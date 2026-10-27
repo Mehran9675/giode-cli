@@ -107,6 +107,7 @@ target_sdk = 35
 arch = ["arm64", "amd64"]     # default: arm, arm64, 386, amd64
 permissions = ["network", "camera", "microphone", "android.permission.VIBRATE"]
 keep_alive = true             # declares giode's foreground service for App.KeepAlive
+gio_patches = true            # build against Gio with giode's Android fixes (default true)
 notifications = true          # POST_NOTIFICATIONS for App.Notify (default true)
 queries = ["com.android.chrome"]
 manifest = '<uses-feature android:name="android.hardware.camera" android:required="false"/>'
@@ -194,6 +195,22 @@ with publisher, version and size, and an uninstaller. By default it installs for
 current user into `%LOCALAPPDATA%\Programs`, without an administrator prompt;
 `per_machine = true` installs for everyone into Program Files. It runs silently with
 `/S`. The uninstaller isn't signed yet.
+
+## Patched Gio for Android
+
+Gio as released asks Android's Choreographer for the next frame only after presenting the
+current one. Presenting waits for a vsync, so the request misses the next one, and a 120Hz
+display gets 60 frames a second while anything animates. `giode build android` (and `aab`,
+and `giode run android`) builds against a copy of your Gio version with that fixed: the
+request is made before drawing, and a frame callback that arrives after the animation
+stopped is dropped instead of drawing a frame for nothing.
+
+Your `go.mod` isn't touched. The copy is made once per Gio version in the user cache
+directory (`giode/gio/<version>-giode<n>`), and the build gets a temporary `go.mod` with
+`replace gioui.org => <copy>` through `GOFLAGS=-modfile`. The patch is skipped, with a
+note, when your module already replaces `gioui.org`, vendors its dependencies or is in a
+Go workspace, or when your Gio version doesn't have the code the patch expects. Set
+`gio_patches = false` under `[android]` to build against plain Gio.
 
 ## License
 
