@@ -207,9 +207,10 @@ stopped is dropped instead of drawing a frame for nothing.
 
 Your `go.mod` isn't touched. The copy is made once per Gio version in the user cache
 directory (`giode/gio/<version>-giode<n>`), and the build gets a temporary `go.mod` with
-`replace gioui.org => <copy>` through `GOFLAGS=-modfile`. The patch is skipped, with a
-note, when your module already replaces `gioui.org`, vendors its dependencies or is in a
-Go workspace, or when your Gio version doesn't have the code the patch expects. Set
+`replace gioui.org => <copy>`, passed with `-modfile` to the `go build` and `go list`
+commands run in your module (`GOFLAGS` is left alone). The patch is skipped, with a note,
+when go isn't in module mode, or your module already replaces `gioui.org`, vendors its
+dependencies or is in a Go workspace, or when your Gio version doesn't have the code the patch expects. Set
 `gio_patches = false` under `[android]` to build against plain Gio.
 
 ## License

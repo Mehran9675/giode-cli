@@ -89,6 +89,23 @@ type Options struct {
 	Args []string
 	// Extras adds what gogio's templates can't express.
 	Extras Extras
+	// ModFile, when set, is passed as -modfile to the go build and go
+	// list commands run in the app's module - and only to those, since
+	// go refuses the flag outside module mode.
+	ModFile string
+}
+
+// modFile is Options.ModFile for the build in progress.
+var modFile string
+
+// goCommand returns a go build or go list command run in the app's
+// module, with -modfile when the build uses one.
+func goCommand(sub string, args ...string) *exec.Cmd {
+	a := []string{sub}
+	if modFile != "" {
+		a = append(a, "-modfile="+modFile)
+	}
+	return exec.Command("go", append(a, args...)...)
 }
 
 // Extras are additions to the generated app metadata, beyond gogio.
@@ -115,6 +132,8 @@ func Build(pkg string, o Options) error {
 	*notaryID, *notaryPass, *notaryTeamID = o.NotaryID, o.NotaryPass, o.NotaryTeamID
 	*schemes, *pkgQueries = strings.Join(o.Schemes, ","), strings.Join(o.Queries, ",")
 	appArgs, extras = o.Args, o.Extras
+	modFile = o.ModFile
+	defer func() { modFile = "" }()
 	if *buildMode == "" {
 		*buildMode = "exe"
 	}

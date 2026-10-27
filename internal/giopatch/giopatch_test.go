@@ -1,6 +1,7 @@
 package giopatch
 
 import (
+	"errors"
 	"go/parser"
 	"go/token"
 	"os"
@@ -38,17 +39,13 @@ func TestPrepare(t *testing.T) {
 	}
 	defer cleanup()
 
-	var dir string
-	err = WithModfile(modfile, func() error {
-		cmd := exec.Command("go", "list", "-f", "{{.Dir}}", "gioui.org/app")
-		cmd.Dir = app
-		out, err := cmd.Output()
-		dir = strings.TrimSpace(string(out))
-		return err
-	})
+	cmd := exec.Command("go", "list", "-modfile="+modfile, "-f", "{{.Dir}}", "gioui.org/app")
+	cmd.Dir = app
+	out, err := cmd.Output()
 	if err != nil {
 		t.Fatal(err)
 	}
+	dir := strings.TrimSpace(string(out))
 	if !strings.Contains(dir, filepath.Join("giode", "gio")) {
 		t.Fatalf("gioui.org/app resolved to %s, not the patched copy", dir)
 	}
@@ -62,8 +59,11 @@ func TestPrepare(t *testing.T) {
 	if _, err := parser.ParseFile(token.NewFileSet(), "os_android.go", src, 0); err != nil {
 		t.Errorf("patched os_android.go doesn't parse: %v", err)
 	}
-	if os.Getenv("GOFLAGS") != "" {
-		t.Error("GOFLAGS not restored")
+	if _, err := os.Stat(filepath.Join(app, "go.mod")); err != nil {
+		t.Error(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(app, "go.mod")); strings.Contains(string(b), "replace") {
+		t.Error("the app's go.mod was changed")
 	}
 
 	// A second build reuses the copy.
@@ -73,6 +73,19 @@ func TestPrepare(t *testing.T) {
 	}
 	c2()
 	_ = m2
+}
+
+// TestPrepare_NotModuleMode skips the patch when go isn't in module
+// mode, where -modfile is refused.
+func TestPrepare_NotModuleMode(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no go command")
+	}
+	t.Setenv("GO111MODULE", "off")
+	_, _, err := Prepare(t.TempDir(), Android)
+	if !errors.Is(err, ErrSkipped) {
+		t.Errorf("GO111MODULE=off: %v, want ErrSkipped", err)
+	}
 }
 
 func TestApply_MismatchSkips(t *testing.T) {

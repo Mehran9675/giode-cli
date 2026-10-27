@@ -209,9 +209,7 @@ func exeIOS(tmpDir, target, app string, bi *buildInfo) error {
 		cflagsLine := strings.Join(cflags, " ")
 		exeSlice := filepath.Join(tmpDir, "app-"+a)
 		lipo.Args = append(lipo.Args, exeSlice)
-		compile := exec.Command(
-			"go",
-			"build",
+		compile := goCommand("build",
 			"-ldflags=-s -w "+bi.ldflags,
 			"-o", exeSlice,
 			"-tags", bi.tags,
@@ -530,9 +528,7 @@ func archiveIOS(tmpDir, target, frameworkRoot string, bi *buildInfo) error {
 			return err
 		}
 		lib := filepath.Join(tmpDir, "gio-"+a)
-		cmd := exec.Command(
-			"go",
-			"build",
+		cmd := goCommand("build",
 			"-ldflags=-s -w "+bi.ldflags,
 			"-buildmode=c-archive",
 			"-o", lib,
@@ -561,7 +557,7 @@ func archiveIOS(tmpDir, target, frameworkRoot string, bi *buildInfo) error {
 	if _, err := runCmd(lipo); err != nil {
 		return err
 	}
-	appDir, err := runCmd(exec.Command("go", "list", "-tags", tags, "-f", "{{.Dir}}", "gioui.org/app/"))
+	appDir, err := runCmd(goCommand("list", "-tags", tags, "-f", "{{.Dir}}", "gioui.org/app/"))
 	if err != nil {
 		return err
 	}

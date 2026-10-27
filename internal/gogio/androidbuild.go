@@ -221,9 +221,7 @@ func compileAndroid(tmpDir string, tools *androidTools, bi *buildInfo) (err erro
 			return fmt.Errorf("failed to create %q: %v", archDir, err)
 		}
 		libFile := filepath.Join(archDir, "libgio.so")
-		cmd := exec.Command(
-			"go",
-			"build",
+		cmd := goCommand("build",
 			"-ldflags=-w -s -extldflags \"-Wl,-z,max-page-size=65536\" "+bi.ldflags,
 			"-buildmode=c-shared",
 			"-tags", bi.tags,
@@ -244,7 +242,7 @@ func compileAndroid(tmpDir string, tools *androidTools, bi *buildInfo) (err erro
 			return err
 		})
 	}
-	appDir, err := runCmd(exec.Command("go", "list", "-tags", bi.tags, "-f", "{{.Dir}}", "gioui.org/app/"))
+	appDir, err := runCmd(goCommand("list", "-tags", bi.tags, "-f", "{{.Dir}}", "gioui.org/app/"))
 	if err != nil {
 		return err
 	}

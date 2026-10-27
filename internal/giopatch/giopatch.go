@@ -1,7 +1,9 @@
 // Package giopatch builds apps against a patched copy of Gio, for fixes
 // Gio hasn't released yet. The copy lives in the user cache directory;
 // the app's go.mod is left alone: the build gets a temporary copy of it
-// with a replace directive, through GOFLAGS=-modfile.
+// with a replace directive, passed with -modfile to the go build and go
+// list commands run in the app's module. (Not through GOFLAGS: go
+// refuses -modfile in commands that run outside module mode.)
 package giopatch
 
 import (
@@ -84,14 +86,21 @@ type module struct {
 }
 
 // Prepare makes a patched copy of the Gio module the app in dir uses
-// and returns the -modfile to build with, and a cleanup function
-// removing it.
+// and returns the go.mod to build with (go build -modfile), and a
+// cleanup function removing it.
 func Prepare(dir string, patches []patch) (modfile string, cleanup func(), err error) {
 	if _, err := os.Stat(filepath.Join(dir, "vendor")); err == nil {
 		return "", nil, fmt.Errorf("%w: the module vendors its dependencies", ErrSkipped)
 	}
 	if out, err := goCmd(dir, "env", "GOWORK"); err == nil && out != "" && out != "off" {
 		return "", nil, fmt.Errorf("%w: the module is in a workspace (%s)", ErrSkipped, out)
+	}
+	gomodPath, err := goCmd(dir, "env", "GOMOD")
+	if err != nil {
+		return "", nil, err
+	}
+	if gomodPath == "" || gomodPath == os.DevNull {
+		return "", nil, fmt.Errorf("%w: %s isn't built in module mode", ErrSkipped, dir)
 	}
 	out, err := goCmd(dir, "list", "-m", "-json", "gioui.org")
 	if err != nil {
@@ -125,7 +134,8 @@ func Prepare(dir string, patches []patch) (modfile string, cleanup func(), err e
 		return "", nil, err
 	}
 	cleanup = func() { os.RemoveAll(tmp) }
-	gomod, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	// The module root may be above dir, where giode.toml is.
+	gomod, err := os.ReadFile(gomodPath)
 	if err != nil {
 		cleanup()
 		return "", nil, err
@@ -136,7 +146,7 @@ func Prepare(dir string, patches []patch) (modfile string, cleanup func(), err e
 		cleanup()
 		return "", nil, err
 	}
-	if sum, err := os.ReadFile(filepath.Join(dir, "go.sum")); err == nil {
+	if sum, err := os.ReadFile(filepath.Join(filepath.Dir(gomodPath), "go.sum")); err == nil {
 		if err := os.WriteFile(filepath.Join(tmp, "go.sum"), sum, 0o644); err != nil {
 			cleanup()
 			return "", nil, err
@@ -244,25 +254,4 @@ func goCmd(dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("go %s: %w", strings.Join(args, " "), err)
 	}
 	return strings.TrimSpace(string(out)), nil
-}
-
-// WithModfile runs fn with GOFLAGS set to build with modfile, then
-// restores GOFLAGS.
-func WithModfile(modfile string, fn func() error) error {
-	old, had := os.LookupEnv("GOFLAGS")
-	flag := "-modfile=" + modfile
-	if strings.ContainsAny(flag, " \t") {
-		// GOFLAGS splits at spaces outside quotes.
-		flag = "'" + flag + "'"
-	}
-	flags := strings.TrimSpace(old + " " + flag)
-	os.Setenv("GOFLAGS", flags)
-	defer func() {
-		if had {
-			os.Setenv("GOFLAGS", old)
-		} else {
-			os.Unsetenv("GOFLAGS")
-		}
-	}()
-	return fn()
 }
