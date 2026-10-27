@@ -1,0 +1,49 @@
+# giode.toml configures how the giode CLI builds this app.
+# Reference: https://github.com/mehran9675/giode-cli#giodetoml
+
+[app]
+name = "[[.Name]]"
+id = "[[.AppID]]"            # reverse-DNS, unique to your app; stores never let it change
+version = "0.1.0"
+build = 1                    # raise for every store upload
+icon = "assets/icon.png"     # replace the placeholder (see assets/README.md)
+package = "."
+publisher = "[[.Name]]"      # TODO: your name or company, shown by installers
+description = ""             # TODO: one line about the app
+website = ""                 # TODO: https://...
+
+[android]
+min_sdk = 21
+# permissions = ["network", "camera", "microphone"]
+# keep_alive = true          # lets App.KeepAlive keep work running in the background
+# keystore = "release.keystore"   # created by giode keystore; signs giode build -release
+
+[ios]
+min_os = 15
+# profile = "App.mobileprovision" # for device builds
+
+# Texts iOS shows when asking for permission. iOS ends an app that uses
+# the camera, microphone or speech recognition without them.
+# [ios.usage]
+# camera = "To attach photos you take."
+# microphone = "To dictate notes."
+
+[macos]
+# identity = "Developer ID Application: Your Name (TEAMID)"  # signs giode build -release
+# notary_id = "you@example.com"     # notarizes, with the password in $GIODE_NOTARY_PASS
+# notary_team_id = "TEAMID"
+
+[windows]
+arch = "amd64"
+
+[windows.installer]
+# per_machine = true         # install for all users into Program Files (asks for admin)
+# desktop_shortcut = true
+# license = "assets/license.txt"
+
+[windows.signing]
+# certificate = "codesign.pfx"   # created by giode cert (testing) or bought; password in $GIODE_WINDOWS_CERT_PASS
+# timestamp = "http://timestamp.digicert.com"
+
+[web]
+port = 8080

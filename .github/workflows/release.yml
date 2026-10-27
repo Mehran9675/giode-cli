@@ -1,0 +1,46 @@
+name: Release
+
+# Pushing a tag like v0.2.0 builds giode for every platform and publishes
+# a GitHub release with the archives install.sh, install.ps1 and
+# giode self-update download.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - run: go test ./...
+      - name: Build
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p out
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            os=${target%/*}; arch=${target#*/}
+            dir=giode_${os}_${arch}
+            mkdir -p "$dir"
+            bin=giode; [ "$os" = windows ] && bin=giode.exe
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X main.version=$VERSION" -o "$dir/$bin" ./cmd/giode
+            cp LICENSE NOTICE README.md "$dir/"
+            if [ "$os" = windows ]; then
+              (cd "$dir" && zip -q -r "../out/$dir.zip" .)
+            else
+              tar -czf "out/$dir.tar.gz" "$dir"
+            fi
+          done
+          (cd out && sha256sum * > checksums.txt)
+          ls -la out
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" out/* --title "$GITHUB_REF_NAME" --generate-notes

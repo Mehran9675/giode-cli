@@ -1,0 +1,8 @@
+giode CLI
+Copyright 2026 The giode authors
+
+This product includes code derived from gogio, part of Gio
+(https://gioui.org, https://git.sr.ht/~eliasnaur/gio-cmd), copyright 2019
+The Gio authors, used under the MIT license (it is also available under
+the Unlicense). The derived code is in internal/gogio, whose LICENSE file
+reproduces Gio's license terms.
