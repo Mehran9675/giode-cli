@@ -198,15 +198,23 @@ current user into `%LOCALAPPDATA%\Programs`, without an administrator prompt;
 
 ## Patched Gio for Android
 
-Gio as released asks Android's Choreographer for the next frame only after presenting the
-current one. Presenting waits for a vsync, so the request misses the next one, and a 120Hz
-display gets 60 frames a second while anything animates. `giode build android` (and `aab`,
-and `giode run android`) builds against a copy of your Gio version with that fixed: the
-request is made before drawing, and a frame callback that arrives after the animation
-stopped is dropped instead of drawing a frame for nothing.
+`giode build android` (and `aab`, and `giode run android`) builds against a copy of your Gio
+version with two Android fixes Gio hasn't released:
+
+- **Full refresh rate.** Gio asks Android's Choreographer for the next frame only after
+  presenting the current one. Presenting waits for a vsync, so the request misses the next
+  one, and a 120Hz display gets 60 frames a second while anything animates. The patched
+  copy asks before drawing, and drops a frame callback that arrives after the animation
+  stopped instead of drawing a frame for nothing.
+- **Held keys repeat.** After every edit Gio restarts the soft keyboard's input connection
+  if the editor's snippet of text differs from the keyboard's - which it does after any
+  edit, since the editor's snippet window moves with the text. The restart cancels the
+  keyboard's key repeat, so holding backspace deleted one character. The patched copy
+  restarts only when the text changed under the keyboard (an app clearing or replacing the
+  field), not when the editor just moved its window over text the keyboard already has.
 
 Your `go.mod` isn't touched. The copy is made once per Gio version in the user cache
-directory (`giode/gio/<version>-giode<n>`), and the build gets a temporary `go.mod` with
+directory (`giode/gio/<version>-giode<n>`, made again when the patches change), and the build gets a temporary `go.mod` with
 `replace gioui.org => <copy>`, passed with `-modfile` to the `go build` and `go list`
 commands run in your module (`GOFLAGS` is left alone). The patch is skipped, with a note,
 when go isn't in module mode, or your module already replaces `gioui.org`, vendors its
