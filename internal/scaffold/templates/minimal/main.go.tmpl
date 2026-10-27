@@ -1,0 +1,27 @@
+// Command [[.Binary]] is a minimal giode app.
+package main
+
+import (
+	"fmt"
+	"log"
+
+	"github.com/mehran9675/giode"
+)
+
+func main() {
+	giode.UseGofont()
+
+	count := 0
+	btn := giode.Button("Click me", giode.Styles{Background: "theme.primary", Color: "theme.onprimary", BorderRadius: 8}).
+		OnClick(func() { count++ })
+
+	app := giode.New(giode.Config{Title: "[[.Name]]", Resizable: true, Background: "theme.background"})
+	if err := app.Run(func() giode.Element {
+		return giode.Stack(giode.Styles{Align: giode.AlignCenter, Justify: giode.JustifyCenter, Width: -1, Height: -1, Gap: 12},
+			giode.Text(fmt.Sprintf("Clicks: %d", count), giode.Styles{Color: "theme.text", FontSize: 20}),
+			btn,
+		)
+	}); err != nil {
+		log.Fatal(err)
+	}
+}

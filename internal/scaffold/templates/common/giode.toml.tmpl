@@ -1,0 +1,29 @@
+# giode.toml configures how the giode CLI builds this app.
+# Reference: https://github.com/mehran9675/giode-cli#giodetoml
+
+[app]
+name = "[[.Name]]"
+id = "[[.AppID]]"
+version = "0.1.0"
+build = 1              # raise for every store upload
+icon = "assets/icon.png"
+package = "."
+
+[android]
+min_sdk = 21
+# target_sdk = 35
+# permissions = ["network", "camera", "microphone"]
+# keep_alive = true      # App.KeepAlive keeps work running in the background
+# keystore = "release.keystore"   # giode keystore creates one; used by -release
+
+[ios]
+min_os = 15
+# Texts iOS shows when asking for permission. iOS ends an app that uses
+# the camera, microphone or speech recognition without them.
+# [ios.usage]
+# camera = "To attach photos you take."
+# microphone = "To dictate notes."
+# speech = "To dictate notes."
+
+[web]
+port = 8080
