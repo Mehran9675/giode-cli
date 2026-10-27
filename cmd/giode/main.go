@@ -41,9 +41,12 @@ func init() {
 		{"devices", "list connected Android devices and iOS simulators", devicesUsage, cmdDevices},
 		{"doctor", "check Go, the Android SDK and NDK, Java, Xcode and system libraries", doctorUsage, cmdDoctor},
 		{"keystore", "create an Android release keystore", keystoreUsage, cmdKeystore},
+		{"cert", "create a self-signed Windows code signing certificate for testing", certUsage, cmdCert},
+		{"sign", "sign Windows executables and installers", signUsage, cmdSign},
 		{"upgrade", "update the project to the latest giode", upgradeUsage, cmdUpgrade},
 		{"manifest", "print the Android manifest and Info.plist additions from giode.toml", manifestUsage, cmdManifest},
 		{"clean", "remove build output", cleanUsage, cmdClean},
+		{"self-update", "update the giode CLI to the latest release", selfUpdateUsage, cmdSelfUpdate},
 		{"version", "print the giode CLI version", "giode version", cmdVersion},
 	}
 }
@@ -91,7 +94,7 @@ func find(name string) (subcommand, bool) {
 func usage() {
 	fmt.Fprintln(os.Stderr, "giode creates, builds and runs giode apps.\n\nUsage:\n\n\tgiode <command> [arguments]\n\nCommands:")
 	for _, c := range commands {
-		fmt.Fprintf(os.Stderr, "\t%-9s %s\n", c.name, c.summary)
+		fmt.Fprintf(os.Stderr, "\t%-12s %s\n", c.name, c.summary)
 	}
 	fmt.Fprintln(os.Stderr, "\nRun giode help <command> for a command's options.")
 }
@@ -127,12 +130,23 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 	}
 }
 
-func cmdVersion(args []string) error {
-	v := "(devel)"
-	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" {
-		v = bi.Main.Version
+// version is set by release builds (-ldflags "-X main.version=v0.2.0").
+var version string
+
+// currentVersion is the release, or the module version go install
+// recorded.
+func currentVersion() string {
+	if version != "" {
+		return version
 	}
-	fmt.Println("giode", v)
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" {
+		return bi.Main.Version
+	}
+	return "(devel)"
+}
+
+func cmdVersion(args []string) error {
+	fmt.Println("giode", currentVersion())
 	return nil
 }
 

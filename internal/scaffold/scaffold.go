@@ -22,12 +22,6 @@ import (
 //go:embed templates
 var templates embed.FS
 
-// Templates lists the project templates.
-var Templates = map[string]string{
-	"app":     "a notes app: theme switch, composer, scrolling list with swipe to delete",
-	"minimal": "a window with a counter button",
-}
-
 // Project describes a project to create.
 type Project struct {
 	// Dir is the directory to create; it must not exist or be empty.
@@ -38,8 +32,6 @@ type Project struct {
 	Module string
 	// AppID is the reverse-DNS app ID.
 	AppID string
-	// Template is a key of Templates.
-	Template string
 }
 
 // data is what the templates see.
@@ -51,9 +43,6 @@ type data struct {
 // .gitignore and README.md. It doesn't create go.mod; the caller runs
 // go mod init and fetches giode.
 func Create(p Project) error {
-	if _, ok := Templates[p.Template]; !ok {
-		return fmt.Errorf("unknown template %q", p.Template)
-	}
 	if entries, err := os.ReadDir(p.Dir); err == nil && len(entries) > 0 {
 		return fmt.Errorf("%s exists and isn't empty", p.Dir)
 	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -75,10 +64,11 @@ func Create(p Project) error {
 func create(p Project) error {
 	d := data{Name: p.Name, Module: p.Module, AppID: p.AppID, Binary: path.Base(p.Module)}
 	files := map[string]string{
-		"main.go":    "templates/" + p.Template + "/main.go.tmpl",
-		"giode.toml": "templates/common/giode.toml.tmpl",
-		".gitignore": "templates/common/gitignore.tmpl",
-		"README.md":  "templates/common/README.md.tmpl",
+		"main.go":          "templates/app/main.go.tmpl",
+		"assets/README.md": "templates/common/assets-README.md.tmpl",
+		"giode.toml":       "templates/common/giode.toml.tmpl",
+		".gitignore":       "templates/common/gitignore.tmpl",
+		"README.md":        "templates/common/README.md.tmpl",
 	}
 	for dst, src := range files {
 		// [[ ]] delimiters, since Go code is full of {{ }}.

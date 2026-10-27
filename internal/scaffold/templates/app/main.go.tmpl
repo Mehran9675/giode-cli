@@ -1,93 +1,46 @@
-// Command [[.Binary]] is a giode app: a list of notes with a composer,
-// light and dark themes, and swipe-to-delete on touch screens.
+// Command [[.Binary]] is a giode app.
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"log"
 
 	"github.com/mehran9675/giode"
-	"github.com/mehran9675/giode/components/swipeable"
 )
 
-type note struct {
-	id   int
-	text string
-}
+// icon is the window icon. Replace assets/icon.png with your own; giode
+// build also uses it for the app icon on every platform.
+//
+//go:embed assets/icon.png
+var icon []byte
 
 func main() {
 	giode.UseGofont()
 
-	var (
-		notes  []note
-		nextID int
-	)
-	add := func(text string) {
-		if text == "" {
-			return
-		}
-		nextID++
-		notes = append(notes, note{id: nextID, text: text})
-	}
-	remove := func(id int) {
-		for i, n := range notes {
-			if n.id == id {
-				notes = append(notes[:i], notes[i+1:]...)
-				return
-			}
-		}
-	}
-	add("Swipe a note left to delete it")
-	add("Edit giode.toml to set the app ID, icon and permissions")
+	// App state. Plain variables work: the view below is rebuilt after
+	// every event. Use giode.NewState for values other goroutines set.
+	count := 0
 
-	composer := giode.Input.Text("Write a note…", giode.Styles{Width: -1})
-	composer.Submit(func(text string) {
-		add(text)
-		composer.SetText("")
-	})
-	addBtn := giode.Button("Add", giode.Styles{Background: "theme.primary", Color: "theme.onprimary", BorderRadius: 8}).
-		OnClick(func() { composer.SubmitText() })
-
-	dark := giode.Input.Switch("Dark").OnChange(func(on bool) {
-		if on {
-			giode.SetMode(giode.ModeDark)
-		} else {
-			giode.SetMode(giode.ModeLight)
-		}
-	})
-
-	list := giode.Scroll(func() giode.Element {
-		rows := make([]giode.Element, 0, len(notes))
-		for _, n := range notes {
-			rows = append(rows, giode.Keyed("notes", n.id, func() *swipeable.Swipeable {
-				return giode.Swipeable(func() giode.Element {
-					return giode.Box(giode.Styles{Width: -1, Padding: giode.SymmetricInset(16, 14), Background: "theme.surface", BorderRadius: 10},
-						giode.Text(n.text, giode.Styles{Color: "theme.text"}))
-				}, nil, []giode.SwipeAction{{Label: "Delete", Background: "theme.danger", OnTap: func() { remove(n.id) }}})
-			}))
-		}
-		return giode.Stack(giode.Styles{Width: -1, Gap: 8, Padding: giode.UniformInset(16)}, rows...)
-	})
+	increment := giode.Button("Count", giode.Styles{
+		Background:   "theme.primary",
+		Color:        "theme.onprimary",
+		BorderRadius: 8,
+	}).OnClick(func() { count++ })
 
 	app := giode.New(giode.Config{
 		Title:      "[[.Name]]",
 		Resizable:  true,
 		Background: "theme.background",
+		Icon:       icon,
 	})
+
+	// The view: a function returning the UI for the current state.
 	if err := app.Run(func() giode.Element {
-		return giode.Stack(giode.Styles{Width: -1, Height: -1},
-			giode.Row(giode.Styles{Width: -1, Align: giode.AlignCenter, Wrap: giode.WrapNoWrap, Padding: giode.SymmetricInset(16, 12)},
-				giode.Text("[[.Name]]", giode.Styles{Color: "theme.text", FontSize: 22, FontWeight: giode.FontWeightBold}),
-				giode.Box(giode.Styles{FlexGrow: 1}),
-				giode.Box(giode.Styles{Width: 110}, dark),
-			),
-			giode.Box(giode.Styles{Padding: giode.SymmetricInset(16, 0)},
-				giode.Text(fmt.Sprintf("%d notes", len(notes)), giode.Styles{Color: "theme.muted"})),
-			giode.Box(giode.Styles{Width: -1, FlexGrow: 1}, list),
-			giode.Row(giode.Styles{Width: -1, Gap: 8, Align: giode.AlignCenter, Wrap: giode.WrapNoWrap, Padding: giode.UniformInset(16)},
-				giode.Box(giode.Styles{FlexGrow: 1}, composer),
-				addBtn,
-			),
+		return giode.Stack(giode.Styles{Width: -1, Height: -1, Align: giode.AlignCenter, Justify: giode.JustifyCenter, Gap: 16},
+			giode.Text("[[.Name]]", giode.Styles{Color: "theme.text", FontSize: 24}),
+			giode.Text(fmt.Sprintf("Clicks: %d", count), giode.Styles{Color: "theme.muted"}),
+			increment,
 		)
 	}); err != nil {
 		log.Fatal(err)

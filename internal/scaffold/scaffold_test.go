@@ -19,9 +19,9 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestCreate(t *testing.T) {
-	for tmpl := range Templates {
+	for _, tmpl := range []string{"app"} {
 		dir := filepath.Join(t.TempDir(), "proj")
-		err := Create(Project{Dir: dir, Name: "My Notes", Module: "example.com/notes", AppID: "com.example.notes", Template: tmpl})
+		err := Create(Project{Dir: dir, Name: "My Notes", Module: "example.com/notes", AppID: "com.example.notes"})
 		if err != nil {
 			t.Fatalf("%s: %v", tmpl, err)
 		}
@@ -32,6 +32,9 @@ func TestCreate(t *testing.T) {
 		toml, _ := os.ReadFile(filepath.Join(dir, "giode.toml"))
 		if !strings.Contains(string(toml), `id = "com.example.notes"`) {
 			t.Errorf("%s: giode.toml:\n%s", tmpl, toml)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "assets", "README.md")); err != nil {
+			t.Error("no assets/README.md")
 		}
 		f, err := os.Open(filepath.Join(dir, "assets", "icon.png"))
 		if err != nil {
@@ -48,7 +51,7 @@ func TestCreate(t *testing.T) {
 func TestCreate_RefusesNonEmptyDir(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "x"), nil, 0o644)
-	if err := Create(Project{Dir: dir, Name: "A", Module: "a", AppID: "com.example.a", Template: "minimal"}); err == nil {
+	if err := Create(Project{Dir: dir, Name: "A", Module: "a", AppID: "com.example.a"}); err == nil {
 		t.Error("wrote into a non-empty directory")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "x")); err != nil {

@@ -40,7 +40,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev libxkbcommon-x11-dev \
-            libgles2-mesa-dev libegl1-mesa-dev libffi-dev libxcursor-dev libxfixes-dev libvulkan-dev
+            libgles2-mesa-dev libegl1-mesa-dev libffi-dev libxcursor-dev libxfixes-dev libvulkan-dev \
+            nsis osslsigncode
       - name: Install the CLI
         run: go install ./cmd/giode
       - name: Create a project
@@ -60,6 +61,18 @@ jobs:
       - name: Build
         working-directory: ${{ runner.temp }}/demo
         run: giode build -x android windows linux web
+      - name: Build a signed Windows installer
+        working-directory: ${{ runner.temp }}/demo
+        env:
+          GIODE_WINDOWS_CERT_PASS: ci-test-password
+        run: |
+          giode cert
+          giode build -x -release windows-installer
+          for f in dist/windows/Demo.exe dist/windows/Demo-0.1.0-setup.exe; do
+            osslsigncode verify -in "$f" | tee verify.txt
+            grep -q "Subject: /CN=Demo" verify.txt
+            grep -q "Timestamp" verify.txt
+          done
       - name: Check the Android manifest
         working-directory: ${{ runner.temp }}/demo
         run: |
@@ -114,3 +127,48 @@ jobs:
           grep -q '"NSMicrophoneUsageDescription" => "To dictate."' plist.txt
           grep -q '"ITSAppUsesNonExemptEncryption" => false' plist.txt
           test -d dist/macos/Demo.app
+
+  # Builds, signs, installs and uninstalls the Windows installer on
+  # Windows, with NSIS and signtool from the runner image.
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Install the CLI
+        run: go install ./cmd/giode
+      - name: Create a project
+        working-directory: ${{ runner.temp }}
+        run: giode new -id org.giode.demo -no-git demo
+      - name: Build a signed installer
+        working-directory: ${{ runner.temp }}/demo
+        env:
+          GIODE_WINDOWS_CERT_PASS: ci-test-password
+        run: |
+          giode doctor
+          giode cert
+          giode build -x -release windows-installer
+      - name: Check the signatures
+        working-directory: ${{ runner.temp }}/demo
+        shell: pwsh
+        run: |
+          foreach ($f in 'dist\windows\Demo.exe', 'dist\windows\Demo-0.1.0-setup.exe') {
+            $s = Get-AuthenticodeSignature $f
+            "$f : $($s.Status) $($s.SignerCertificate.Subject)"
+            # Self-signed, so not trusted, but signed by our certificate.
+            if ($s.SignerCertificate.Subject -ne 'CN=Demo') { exit 1 }
+          }
+      - name: Install, check and uninstall
+        working-directory: ${{ runner.temp }}/demo
+        shell: pwsh
+        run: |
+          Start-Process -Wait -FilePath 'dist\windows\Demo-0.1.0-setup.exe' -ArgumentList '/S'
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Demo'
+          if (-not (Test-Path (Join-Path $dir 'Demo.exe'))) { throw 'Demo.exe not installed' }
+          $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\org.giode.demo'
+          Get-ItemProperty $key | Format-List DisplayName, DisplayVersion, Publisher, UninstallString
+          # _?= runs the uninstaller in place, so -Wait waits for it.
+          Start-Process -Wait -FilePath (Join-Path $dir 'Uninstall.exe') -ArgumentList '/S', "_?=$dir"
+          if (Test-Path $key) { throw 'uninstall entry left behind' }

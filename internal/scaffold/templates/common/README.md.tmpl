@@ -3,12 +3,14 @@
 A [giode](https://github.com/mehran9675/giode) app.
 
 ```sh
-giode run              # run on this computer
-giode run android      # build, install and run on a connected Android device
-giode build android    # dist/android/[[.Binary]].apk
-giode build windows    # dist/windows/[[.Binary]].exe
-giode build web        # dist/web
-giode doctor           # check the toolchains
+giode run                    # run on this computer
+giode run android            # on a connected Android device
+giode run windows            # build and run the Windows app (Wine elsewhere)
+giode build android          # dist/android/[[.Binary]].apk
+giode build windows-installer   # dist/windows/[[.Binary]]-<version>-setup.exe
+giode build web              # dist/web
+giode doctor                 # check the toolchains
 ```
 
-App settings - name, ID, version, icon, permissions - are in `giode.toml`.
+App settings - name, ID, version, icon, permissions, signing - are in `giode.toml`.
+Replace the placeholders in `assets/` (see `assets/README.md`) before publishing.

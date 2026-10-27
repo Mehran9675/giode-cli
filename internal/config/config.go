@@ -51,6 +51,12 @@ type App struct {
 	Package string `toml:"package"`
 	// Schemes are URL schemes the app opens (myapp://...).
 	Schemes []string `toml:"schemes"`
+	// Publisher is who makes the app, shown by installers and in
+	// Windows' list of installed apps; Description a one-line summary;
+	// Website the app's home page.
+	Publisher   string `toml:"publisher"`
+	Description string `toml:"description"`
+	Website     string `toml:"website"`
 	// Tags are Go build tags; Ldflags extra linker flags.
 	Tags    string `toml:"tags"`
 	Ldflags string `toml:"ldflags"`
@@ -111,10 +117,14 @@ type IOS struct {
 
 // MacOS configures macOS app bundles.
 type MacOS struct {
-	MinOS   int               `toml:"min_os"`
-	Usage   map[string]string `toml:"usage"`
-	Plist   map[string]any    `toml:"plist"`
-	Profile string            `toml:"profile"`
+	MinOS int               `toml:"min_os"`
+	Usage map[string]string `toml:"usage"`
+	Plist map[string]any    `toml:"plist"`
+	// Identity is the signing identity in the keychain ("Developer ID
+	// Application: Name (TEAMID)") release builds are signed with, or
+	// Profile a .provisionprofile for App Store builds.
+	Identity string `toml:"identity"`
+	Profile  string `toml:"profile"`
 	// Notarization, with the app-specific password read from
 	// NotaryPassEnv (GIODE_NOTARY_PASS by default).
 	NotaryID      string `toml:"notary_id"`
@@ -125,7 +135,46 @@ type MacOS struct {
 // Windows configures Windows builds.
 type Windows struct {
 	// Arch is the GOARCH, amd64 by default.
-	Arch string `toml:"arch"`
+	Arch      string           `toml:"arch"`
+	Signing   WindowsSigning   `toml:"signing"`
+	Installer WindowsInstaller `toml:"installer"`
+}
+
+// WindowsSigning signs release builds and installers with an
+// Authenticode certificate.
+type WindowsSigning struct {
+	// Certificate is a .pfx (PKCS#12) file holding the certificate and
+	// its private key; PasswordEnv names the environment variable with
+	// its password, GIODE_WINDOWS_CERT_PASS by default.
+	Certificate string `toml:"certificate"`
+	PasswordEnv string `toml:"password_env"`
+	// Timestamp is the RFC 3161 timestamp server, so signatures outlive
+	// the certificate; DigiCert's by default, "none" for no timestamp.
+	Timestamp string `toml:"timestamp"`
+	// Command signs with another tool instead, for keys in a hardware
+	// token or a cloud service (Azure Trusted Signing, a KMS): the
+	// command and its arguments, with {file} replaced by the file to
+	// sign in place.
+	Command []string `toml:"command"`
+}
+
+// Configured reports whether there's a way to sign.
+func (s WindowsSigning) Configured() bool {
+	return s.Certificate != "" || len(s.Command) > 0
+}
+
+// WindowsInstaller configures the setup program giode build
+// windows-installer makes.
+type WindowsInstaller struct {
+	// PerMachine installs for every user into Program Files, asking for
+	// administrator rights; by default it installs for the current user
+	// without asking.
+	PerMachine bool `toml:"per_machine"`
+	// License is a text file the installer asks to accept.
+	License string `toml:"license"`
+	// DesktopShortcut adds a desktop shortcut as well as the Start menu
+	// one.
+	DesktopShortcut bool `toml:"desktop_shortcut"`
 }
 
 // Linux configures Linux builds.
@@ -200,6 +249,15 @@ func (c *Config) setDefaults() {
 	if c.MacOS.NotaryPassEnv == "" {
 		c.MacOS.NotaryPassEnv = "GIODE_NOTARY_PASS"
 	}
+	if c.Windows.Signing.PasswordEnv == "" {
+		c.Windows.Signing.PasswordEnv = "GIODE_WINDOWS_CERT_PASS"
+	}
+	if c.Windows.Signing.Timestamp == "" {
+		c.Windows.Signing.Timestamp = "http://timestamp.digicert.com"
+	}
+	if c.App.Publisher == "" {
+		c.App.Publisher = c.App.Name
+	}
 	if c.Web.Port == 0 {
 		c.Web.Port = 8080
 	}
@@ -224,6 +282,9 @@ func (c *Config) Validate() error {
 	}
 	if c.App.Build < 1 {
 		errs = append(errs, fmt.Errorf("app.build must be at least 1"))
+	}
+	if cmd := c.Windows.Signing.Command; len(cmd) > 0 && !strings.Contains(strings.Join(cmd, " "), "{file}") {
+		errs = append(errs, errors.New("windows.signing.command must contain {file}, where the file to sign goes"))
 	}
 	for _, p := range c.Android.Permissions {
 		if _, err := androidPermission(p); err != nil {

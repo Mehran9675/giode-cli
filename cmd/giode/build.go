@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/png"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/mehran9675/giode-cli/internal/config"
 	"github.com/mehran9675/giode-cli/internal/gogio"
+	"github.com/mehran9675/giode-cli/internal/installer"
+	"github.com/mehran9675/giode-cli/internal/sign"
 )
 
 const buildUsage = `
@@ -28,6 +31,9 @@ Builds the app in giode.toml for each target, into dist/<platform>:
 	ios-sim   an app for the iOS simulator (macOS only)
 	macos     a macOS app bundle (macOS only)
 	windows   a Windows executable with icon and manifest (from any OS)
+	windows-installer
+	          a Windows setup program (<App>-<version>-setup.exe) with Start
+	          menu shortcut and uninstaller, made with NSIS (from any OS)
 	linux     a Linux executable with a .desktop file and icon (Linux only)
 	web       a WebAssembly site (dist/web)
 	desktop   this computer's platform
@@ -37,10 +43,19 @@ Android and iOS builds add what giode.toml asks for to the manifest and
 Info.plist: permissions, giode's background service (android.keep_alive),
 usage texts, raw XML and plist keys.
 
+-release builds for distribution, signed with the certificates in
+giode.toml: Android with android.keystore, Windows executables and
+installers with windows.signing (Authenticode), macOS with
+macos.identity (and notarized with macos.notary_id). iOS device builds are
+always signed with ios.profile. Without -release, Android uses the debug
+key and the rest are unsigned.
+
+Short names work too: apk, bundle, win, mac, sim, installer.
+
 Example:
 
 	giode build android windows
-	GIODE_KEYSTORE_PASS=... giode build -release aab
+	giode build -release aab windows-installer
 `
 
 // buildOpts are the options shared by build and run.
@@ -56,7 +71,7 @@ func cmdBuild(args []string) error {
 	fs := flags("build", buildUsage)
 	var o buildOpts
 	dir := fs.String("C", ".", "project directory")
-	fs.BoolVar(&o.release, "release", false, "sign Android builds with android.keystore instead of the debug key")
+	fs.BoolVar(&o.release, "release", false, "build for distribution, signed with the certificates in giode.toml")
 	fs.StringVar(&o.arch, "arch", "", "comma separated GOARCHs to build (default: the target's set)")
 	fs.StringVar(&o.output, "o", "", "output file or directory (one target only)")
 	fs.BoolVar(&o.work, "work", false, "keep and print gogio's work directory")
@@ -95,7 +110,37 @@ func cmdBuild(args []string) error {
 }
 
 // targetNames are the targets build accepts, besides desktop and all.
-var targetNames = []string{"android", "aab", "ios", "ios-sim", "macos", "windows", "linux", "web"}
+var targetNames = []string{"android", "aab", "ios", "ios-sim", "macos", "windows", "windows-installer", "linux", "web"}
+
+// targetAliases are short and alternative target names.
+var targetAliases = map[string]string{
+	"apk":           "android",
+	"bundle":        "aab",
+	"mac":           "macos",
+	"osx":           "macos",
+	"darwin":        "macos",
+	"win":           "windows",
+	"exe":           "windows",
+	"installer":     "windows-installer",
+	"setup":         "windows-installer",
+	"msi":           "windows-installer",
+	"sim":           "ios-sim",
+	"simulator":     "ios-sim",
+	"ios-simulator": "ios-sim",
+	"iphone":        "ios",
+	"wasm":          "web",
+	"js":            "web",
+	"browser":       "web",
+}
+
+// canonical resolves a target alias.
+func canonical(t string) string {
+	t = strings.ToLower(t)
+	if a, ok := targetAliases[t]; ok {
+		return a
+	}
+	return t
+}
 
 // hostTarget is the desktop target for this computer.
 func hostTarget() string {
@@ -112,11 +157,14 @@ func hostTarget() string {
 func expandTargets(ts []string) []string {
 	var out []string
 	for _, t := range ts {
-		switch t {
+		switch t = canonical(t); t {
 		case "desktop":
 			out = append(out, hostTarget())
 		case "all":
 			out = append(out, "web", "windows")
+			if _, err := exec.LookPath("makensis"); err == nil {
+				out = append(out, "windows-installer")
+			}
 			if runtime.GOOS == "linux" {
 				out = append(out, "linux")
 			}
@@ -138,6 +186,8 @@ func buildTarget(c *config.Config, target string, o buildOpts) (string, error) {
 	switch target {
 	case "linux":
 		return buildLinux(c, o)
+	case "windows-installer":
+		return buildWindowsInstaller(c, o)
 	case "android", "aab", "ios", "ios-sim", "macos", "windows", "web":
 	default:
 		return "", fmt.Errorf("unknown target %q; targets: %s, desktop, all", target, strings.Join(targetNames, ", "))
@@ -158,7 +208,59 @@ func buildTarget(c *config.Config, target string, o buildOpts) (string, error) {
 	if err := gogio.Build(pkgPath(c), g); err != nil {
 		return "", err
 	}
+	if target == "windows" && o.release {
+		if err := signWindows(c, g.Output); err != nil {
+			return "", err
+		}
+	}
 	return g.Output, nil
+}
+
+// signWindows signs a release executable or installer when
+// windows.signing is set up, and says so when it isn't.
+func signWindows(c *config.Config, file string) error {
+	if !c.Windows.Signing.Configured() {
+		fmt.Fprintf(os.Stderr, "  note: %s is unsigned; set windows.signing in giode.toml so Windows doesn't warn about it\n", filepath.Base(file))
+		return nil
+	}
+	sign.Verbose = verbose
+	if err := sign.Windows(c, file, c.App.Name); err != nil {
+		return fmt.Errorf("signing %s: %w", filepath.Base(file), err)
+	}
+	fmt.Printf("  signed %s\n", filepath.Base(file))
+	return nil
+}
+
+// buildWindowsInstaller builds the Windows executable and a setup
+// program installing it.
+func buildWindowsInstaller(c *config.Config, o buildOpts) (string, error) {
+	exeOpts := o
+	exeOpts.output = ""
+	exe, err := buildTarget(c, "windows", exeOpts)
+	if err != nil {
+		return "", err
+	}
+	out := filepath.Join(filepath.Dir(exe), fmt.Sprintf("%s-%s-setup.exe", binaryName(c), c.App.Version))
+	if o.output != "" {
+		out, _ = filepath.Abs(o.output)
+	}
+	inst := c.Windows.Installer
+	opts := installer.Options{
+		Name: c.App.Name, ID: c.App.ID, Version: c.App.Version,
+		Publisher: c.App.Publisher, Website: c.App.Website,
+		Exe: exe, Icon: c.Path(c.App.Icon), License: c.Path(inst.License),
+		PerMachine: inst.PerMachine, DesktopShortcut: inst.DesktopShortcut,
+		Output: out, Verbose: verbose,
+	}
+	if err := installer.Build(opts); err != nil {
+		return "", err
+	}
+	if o.release {
+		if err := signWindows(c, out); err != nil {
+			return "", err
+		}
+	}
+	return out, nil
 }
 
 // gogioOptions turns giode.toml into gogio options for a target.
@@ -253,9 +355,23 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 			return g, err
 		}
 		g.Extras = gogio.Extras{InfoPlist: plist}
-		g.SignKey = c.Path(c.MacOS.Profile)
-		g.NotaryID, g.NotaryTeamID = c.MacOS.NotaryID, c.MacOS.NotaryTeamID
-		g.NotaryPass = os.Getenv(c.MacOS.NotaryPassEnv)
+		if o.release {
+			switch {
+			case c.MacOS.Profile != "":
+				g.SignKey = c.Path(c.MacOS.Profile)
+			case c.MacOS.Identity != "":
+				g.SignKey = c.MacOS.Identity
+			default:
+				fmt.Fprintln(os.Stderr, "  note: the app is unsigned; set macos.identity in giode.toml so Gatekeeper lets it open")
+			}
+			if c.MacOS.NotaryID != "" {
+				if g.SignKey == "" {
+					return g, errors.New("notarizing needs a signed app: set macos.identity")
+				}
+				g.NotaryID, g.NotaryTeamID = c.MacOS.NotaryID, c.MacOS.NotaryTeamID
+				g.NotaryPass = os.Getenv(c.MacOS.NotaryPassEnv)
+			}
+		}
 		platform, file = "macos", binaryName(c)+".app"
 	case "windows":
 		g.Target = "windows"

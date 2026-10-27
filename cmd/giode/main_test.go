@@ -42,7 +42,7 @@ func TestSetKeystore(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(p)
-	if !strings.Contains(string(b), "[android]\nkeystore = \"release.keystore\"\nmin_sdk = 21") {
+	if !strings.Contains(string(b), "[android]\nmin_sdk = 21\nkeystore = \"release.keystore\"\n") {
 		t.Errorf("giode.toml:\n%s", b)
 	}
 	os.WriteFile(p, []byte("[app]\nname = \"A\"\n"), 0o644)
@@ -62,5 +62,29 @@ func TestGogioOptions_Windows(t *testing.T) {
 	}
 	if g.Target != "windows" || g.Version != "1.2.3.7" || g.Arch != "amd64" || g.Output != filepath.Join(dir, "dist", "windows", "MyApp.exe") {
 		t.Errorf("options %+v", g)
+	}
+}
+
+func TestSetTOMLValue_AfterComments(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "giode.toml")
+	os.WriteFile(p, []byte("[windows.signing]\n# certificate = \"x.pfx\"\n\n[web]\nport = 1\n"), 0o644)
+	if err := setTOMLValue(p, "windows.signing", "certificate", "codesign.pfx"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(p)
+	want := "[windows.signing]\n# certificate = \"x.pfx\"\ncertificate = \"codesign.pfx\"\n\n[web]\nport = 1\n"
+	if string(b) != want {
+		t.Errorf("got\n%s\nwant\n%s", b, want)
+	}
+}
+
+func TestReplaceExecutable(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "giode")
+	os.WriteFile(p, []byte("old"), 0o755)
+	if err := replaceExecutable(p, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != "new" {
+		t.Errorf("content %q", b)
 	}
 }

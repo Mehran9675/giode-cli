@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/mehran9675/giode-cli/internal/config"
 	"github.com/mehran9675/giode-cli/internal/scaffold"
@@ -14,12 +13,9 @@ import (
 const newUsage = `
 Usage: giode new [options] <directory>
 
-Creates a giode project in directory: main.go from a template, go.mod
-with the latest giode, giode.toml, a placeholder icon, .gitignore and a
-README. Templates:
-
-	app      a notes app: theme switch, composer, scrolling list, swipe to delete (default)
-	minimal  a window with a counter button
+Creates a giode project in directory: a counter app in main.go, go.mod
+with the latest giode, giode.toml with the settings to fill in, a
+placeholder icon and assets/README.md, .gitignore and a README.
 
 Example:
 
@@ -33,7 +29,6 @@ func cmdNew(args []string) error {
 		name     = fs.String("name", "", "display name (default: from the directory name)")
 		module   = fs.String("module", "", "Go module path (default: the directory name)")
 		appID    = fs.String("id", "", "reverse-DNS app ID (default: com.example.<name>)")
-		tmpl     = fs.String("template", "app", "project template: "+strings.Join(sortedNames(scaffold.Templates), ", "))
 		version  = fs.String("giode", "latest", "giode version to require")
 		offline  = fs.Bool("offline", false, "don't fetch giode; run go mod tidy yourself later")
 		noGitDir = fs.Bool("no-git", false, "don't run git init")
@@ -49,7 +44,7 @@ func cmdNew(args []string) error {
 	}
 	dir := pos[0]
 	defName, defModule, defID := scaffold.Defaults(dir)
-	p := scaffold.Project{Dir: dir, Name: defName, Module: defModule, AppID: defID, Template: *tmpl}
+	p := scaffold.Project{Dir: dir, Name: defName, Module: defModule, AppID: defID}
 	if *name != "" {
 		p.Name = *name
 	}
@@ -62,7 +57,7 @@ func cmdNew(args []string) error {
 	if err := scaffold.Create(p); err != nil {
 		return err
 	}
-	fmt.Printf("Created %s (%s template)\n", dir, p.Template)
+	fmt.Printf("Created %s\n", dir)
 
 	if err := run(command(nil, "go", "-C", dir, "mod", "init", p.Module)); err != nil {
 		return err
@@ -84,7 +79,7 @@ func cmdNew(args []string) error {
 			}
 		}
 	}
-	fmt.Printf("\nNext:\n\n\tcd %s\n\tgiode run            # on this computer\n\tgiode run android    # on a connected Android device\n\nApp settings are in %s.\n", dir, config.FileName)
+	fmt.Printf("\nNext:\n\n\tcd %s\n\tgiode run            # on this computer\n\tgiode run android    # on a connected Android device\n\nApp settings are in %s; replace the placeholders in assets/ before publishing.\n", dir, config.FileName)
 	return nil
 }
 

@@ -36,6 +36,7 @@ func cmdDoctor(args []string) error {
 	var checks []check
 	checks = append(checks, checkGo())
 	checks = append(checks, checkAndroid()...)
+	checks = append(checks, checkWindowsPackaging()...)
 	switch runtime.GOOS {
 	case "darwin":
 		checks = append(checks, checkXcode()...)
@@ -204,4 +205,35 @@ func checkLinuxLibs() check {
 			"Others: https://gioui.org/doc/install/linux"
 	}
 	return c
+}
+
+func checkWindowsPackaging() []check {
+	const area = "Windows packaging (giode build windows-installer, -release signing)"
+	nsis := check{area: area, name: "NSIS (makensis)", fix: "winget install NSIS.NSIS, brew install makensis, or apt install nsis"}
+	if p, err := exec.LookPath("makensis"); err == nil {
+		nsis.ok, nsis.detail = true, p
+	} else if runtime.GOOS == "windows" {
+		for _, root := range []string{os.Getenv("ProgramFiles(x86)"), os.Getenv("ProgramFiles")} {
+			if p := filepath.Join(root, "NSIS", "makensis.exe"); root != "" {
+				if _, err := os.Stat(p); err == nil {
+					nsis.ok, nsis.detail = true, p
+				}
+			}
+		}
+	}
+	signer := check{area: area, name: "osslsigncode", fix: "apt install osslsigncode, or brew install osslsigncode"}
+	tool := "osslsigncode"
+	if runtime.GOOS == "windows" {
+		signer = check{area: area, name: "signtool", fix: "Install the Windows SDK's \"Signing Tools for Desktop Apps\""}
+		tool = "signtool"
+	}
+	if p, err := exec.LookPath(tool); err == nil {
+		signer.ok, signer.detail = true, p
+	} else if runtime.GOOS == "windows" {
+		m, _ := filepath.Glob(filepath.Join(os.Getenv("ProgramFiles(x86)"), "Windows Kits", "10", "bin", "*", "x64", "signtool.exe"))
+		if len(m) > 0 {
+			signer.ok, signer.detail = true, m[len(m)-1]
+		}
+	}
+	return []check{nsis, signer}
 }

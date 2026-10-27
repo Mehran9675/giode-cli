@@ -120,22 +120,9 @@ func cmdKeystore(args []string) error {
 	return nil
 }
 
-// setKeystore adds keystore = path to giode.toml's [android] table,
-// creating the table when there's none.
+// setKeystore points android.keystore at path.
 func setKeystore(tomlPath, keystore string) error {
-	b, err := os.ReadFile(tomlPath)
-	if err != nil {
-		return err
-	}
-	line := fmt.Sprintf("keystore = %q", filepath.ToSlash(keystore))
-	s := string(b)
-	if i := strings.Index(s, "[android]\n"); i >= 0 {
-		at := i + len("[android]\n")
-		s = s[:at] + line + "\n" + s[at:]
-	} else {
-		s = strings.TrimRight(s, "\n") + "\n\n[android]\n" + line + "\n"
-	}
-	return os.WriteFile(tomlPath, []byte(s), 0o644)
+	return setTOMLValue(tomlPath, "android", "keystore", filepath.ToSlash(keystore))
 }
 
 const upgradeUsage = `
