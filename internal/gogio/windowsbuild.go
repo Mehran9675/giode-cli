@@ -13,7 +13,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -257,9 +256,7 @@ func (b *windowsBuilder) buildProgram(buildInfo *buildInfo, name string, arch st
 		ldflags += ` -X "gioui.org/app.ID=` + buildInfo.appID + `" `
 	}
 
-	cmd := exec.Command(
-		"go",
-		"build",
+	cmd := goCommand("build",
 		"-ldflags=-H=windowsgui "+ldflags,
 		"-tags="+buildInfo.tags,
 		"-o", dest,

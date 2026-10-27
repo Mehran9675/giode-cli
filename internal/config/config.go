@@ -77,6 +77,10 @@ type Android struct {
 	// vibrate, biometric, location, coarse_location, contacts,
 	// calendar, boot) or full names (android.permission.X).
 	Permissions []string `toml:"permissions"`
+	// GioPatches builds against a copy of Gio with giode's fixes for
+	// Android: rendering at the display's full refresh rate (Gio as
+	// released holds 120Hz displays at 60fps). True by default.
+	GioPatches *bool `toml:"gio_patches"`
 	// KeepAlive declares giode's foreground service, so App.KeepAlive
 	// keeps work running after the app leaves the screen. It adds the
 	// service and its permissions.

@@ -7,7 +7,6 @@ package gogio
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -174,11 +173,11 @@ type packageMetadata struct {
 }
 
 func getPkgMetadata(pkgPath string) (*packageMetadata, error) {
-	pkgImportPath, err := runCmd(exec.Command("go", "list", "-tags", *extraTags, "-f", "{{.ImportPath}}", pkgPath))
+	pkgImportPath, err := runCmd(goCommand("list", "-tags", *extraTags, "-f", "{{.ImportPath}}", pkgPath))
 	if err != nil {
 		return nil, err
 	}
-	pkgDir, err := runCmd(exec.Command("go", "list", "-tags", *extraTags, "-f", "{{.Dir}}", pkgPath))
+	pkgDir, err := runCmd(goCommand("list", "-tags", *extraTags, "-f", "{{.Dir}}", pkgPath))
 	if err != nil {
 		return nil, err
 	}

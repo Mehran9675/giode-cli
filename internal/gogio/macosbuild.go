@@ -211,9 +211,7 @@ func (b *macBuilder) buildProgram(buildInfo *buildInfo, binDest string, name str
 		return err
 	}
 
-	cmd := exec.Command(
-		"go",
-		"build",
+	cmd := goCommand("build",
 		"-ldflags="+buildInfo.ldflags,
 		"-tags="+buildInfo.tags,
 		"-o", filepath.Join(binDest, "/Contents/MacOS/"+name),

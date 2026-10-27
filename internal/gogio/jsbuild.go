@@ -25,9 +25,7 @@ func buildJS(bi *buildInfo) error {
 	if err := os.MkdirAll(out, 0o700); err != nil {
 		return err
 	}
-	cmd := exec.Command(
-		"go",
-		"build",
+	cmd := goCommand("build",
 		"-ldflags="+bi.ldflags,
 		"-tags="+bi.tags,
 		"-o", filepath.Join(out, "main.wasm"),
