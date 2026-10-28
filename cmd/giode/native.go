@@ -1,6 +1,8 @@
 package main
 
 import (
+	"debug/pe"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,10 +18,28 @@ import (
 // nativeLibs returns the shared libraries bin loads that [native]
 // bundles, warning about imported ones it couldn't find.
 func nativeLibs(c *config.Config, goos, bin string) ([]native.Lib, error) {
-	if !c.Native.Bundle {
+	// Gio's OpenGL renderer on Windows is ANGLE, which must ship with
+	// the app: bundle it (and what it needs) whether or not [native] is.
+	angle := goos == "windows" && c.App.Renderer == "opengl"
+	if !c.Native.Bundle && !angle {
 		return nil, nil
 	}
-	search, libs, exclude := c.NativeOptions(goos)
+	search, libs, exclude, err := c.NativeOptions(goos)
+	if err != nil {
+		return nil, err
+	}
+	if angle && !hasLib(libs, "libEGL.dll") {
+		found, err := findANGLE(bin, search)
+		if err != nil {
+			return nil, err
+		}
+		if verbose {
+			fmt.Fprintf(os.Stderr, "  ANGLE for app.renderer = \"opengl\": %s\n", filepath.Dir(found[0]))
+		}
+		libs = append(libs, found...)
+		// Its own dependencies (MinGW's runtime) are usually next to it.
+		search = append(search, filepath.Dir(found[0]))
+	}
 	r, err := native.Collect(bin, native.Options{GOOS: goos, Search: search, Libraries: libs, Exclude: exclude})
 	if err != nil {
 		return nil, fmt.Errorf("native libraries: %w", err)
@@ -38,6 +58,70 @@ func nativeLibs(c *config.Config, goos, bin string) ([]native.Lib, error) {
 		}
 	}
 	return r.Libs, nil
+}
+
+func hasLib(libs []string, name string) bool {
+	for _, l := range libs {
+		if strings.EqualFold(filepath.Base(l), name) {
+			return true
+		}
+	}
+	return false
+}
+
+// angleDirs are where ANGLE (libEGL.dll and libGLESv2.dll) is found on
+// a build machine: MSYS2's angleproject package, then a VS Code install
+// (older versions ship it as DLLs; Chrome, Edge and newer Electron
+// apps link it into their own binaries).
+func angleDirs() []string {
+	var dirs []string
+	if p := os.Getenv("MSYSTEM_PREFIX"); p != "" {
+		dirs = append(dirs, filepath.Join(p, "bin"))
+	}
+	for _, root := range []string{os.Getenv("MSYS2_ROOT"), `C:\msys64`, "/c/msys64"} {
+		if root == "" {
+			continue
+		}
+		for _, env := range []string{"clangarm64", "clang64", "ucrt64", "mingw64"} {
+			dirs = append(dirs, filepath.Join(root, env, "bin"))
+		}
+	}
+	for _, p := range []string{filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "Microsoft VS Code"), `C:\Program Files\Microsoft VS Code`} {
+		if !strings.HasPrefix(p, "Programs") {
+			dirs = append(dirs, p)
+		}
+	}
+	return dirs
+}
+
+// findANGLE finds libEGL.dll and libGLESv2.dll for the executable's CPU,
+// in the search directories and then where ANGLE is usually installed.
+func findANGLE(exe string, search []string) ([]string, error) {
+	want := peMachine(exe)
+	for _, d := range append(append([]string{}, search...), angleDirs()...) {
+		egl, gles := filepath.Join(d, "libEGL.dll"), filepath.Join(d, "libGLESv2.dll")
+		if _, err := os.Stat(egl); err != nil {
+			continue
+		}
+		if _, err := os.Stat(gles); err != nil {
+			continue
+		}
+		if want != 0 && peMachine(egl) != want {
+			continue
+		}
+		return []string{egl, gles}, nil
+	}
+	return nil, errors.New(`app.renderer = "opengl" needs ANGLE (libEGL.dll and libGLESv2.dll) on Windows, and none was found for this CPU: install MSYS2's angleproject (pacman -S mingw-w64-x86_64-angleproject, or mingw-w64-clang-aarch64-angleproject for ARM64), or list the DLLs in [native.windows] libraries`)
+}
+
+// peMachine returns a PE file's CPU, or 0.
+func peMachine(file string) uint16 {
+	f, err := pe.Open(file)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	return f.FileHeader.Machine
 }
 
 // copyLibs copies libs into dir and returns their new paths.

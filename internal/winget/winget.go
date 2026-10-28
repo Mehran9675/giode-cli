@@ -23,7 +23,7 @@ type App struct {
 	// describe the app; ProductCode is its uninstall entry's key.
 	Name, Version, Publisher, Description, License, Website, ProductCode string
 	// Installer is the setup program; InstallerURL where users download
-	// it ({version} is replaced). PerMachine installs for every user.
+	// it ({version} and {arch} are replaced). PerMachine installs for every user.
 	Installer, InstallerURL string
 	PerMachine              bool
 	// Arch is the GOARCH: amd64, arm64 or 386.
@@ -55,7 +55,7 @@ func Write(a App, dir string) (string, error) {
 	if a.PerMachine {
 		scope = "machine"
 	}
-	url := strings.ReplaceAll(a.InstallerURL, "{version}", a.Version)
+	url := strings.NewReplacer("{version}", a.Version, "{arch}", a.Arch).Replace(a.InstallerURL)
 	out := filepath.Join(dir, "manifests", strings.ToLower(parts[0][:1]), parts[0], parts[1], a.Version)
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return "", err

@@ -1,6 +1,7 @@
 package native
 
 import (
+	"debug/pe"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -118,4 +119,55 @@ func TestPlanMac(t *testing.T) {
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("args\n%q\nwant\n%q", args, want)
 	}
+}
+
+// TestCollectWindowsDLLs reads real Windows DLLs (Wine's) whose imports
+// include ones Windows doesn't have.
+func TestCollectWindowsDLLs(t *testing.T) {
+	dir := "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows"
+	bin := filepath.Join(dir, "d3dx9_43.dll")
+	if _, err := os.Stat(bin); err != nil {
+		t.Skip("no Wine DLLs to read")
+	}
+	f, err := pe.Open(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imports := peImports(f)
+	f.Close()
+	if !containsFold(imports, "d3dxof.dll") || !containsFold(imports, "kernel32.dll") {
+		t.Fatalf("imports %v", imports)
+	}
+	r, err := Collect(bin, Options{GOOS: "windows", Search: []string{dir}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, l := range r.Libs {
+		names = append(names, strings.ToLower(l.Name))
+	}
+	if !containsFold(names, "d3dxof.dll") {
+		t.Errorf("bundled %v, want d3dxof.dll", names)
+	}
+	if containsFold(names, "kernel32.dll") {
+		t.Errorf("bundled a system DLL: %v", names)
+	}
+	// Alone in a folder, without the search directory, the DLL is
+	// reported missing (Windows also looks next to the program).
+	alone := filepath.Join(t.TempDir(), "d3dx9_43.dll")
+	b, _ := os.ReadFile(bin)
+	os.WriteFile(alone, b, 0o644)
+	r, _ = Collect(alone, Options{GOOS: "windows"})
+	if !containsFold(r.Missing, "d3dxof.dll") {
+		t.Errorf("missing %v", r.Missing)
+	}
+}
+
+func containsFold(s []string, v string) bool {
+	for _, x := range s {
+		if strings.EqualFold(x, v) {
+			return true
+		}
+	}
+	return false
 }

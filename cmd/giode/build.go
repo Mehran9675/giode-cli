@@ -35,7 +35,7 @@ no target it builds the app's platforms (app.platforms) this computer can:
 	dmg       the app in a disk image with a link to Applications (macOS only)
 	windows   a Windows executable with icon and manifest (from any OS)
 	windows-installer
-	          a Windows setup program (<App>-<version>-setup.exe) with Start
+	          a Windows setup program (<App>-<version>-<arch>-setup.exe) with Start
 	          menu shortcut and uninstaller, made with NSIS (from any OS)
 	msix      an MSIX package for the Microsoft Store and App Installer
 	          (from any OS; installable once signed)
@@ -313,7 +313,7 @@ func buildWindowsInstaller(c *config.Config, o buildOpts) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	out := filepath.Join(filepath.Dir(exe), fmt.Sprintf("%s-%s-setup.exe", binaryName(c), c.App.Version))
+	out := filepath.Join(filepath.Dir(exe), fmt.Sprintf("%s-%s-%s-setup.exe", binaryName(c), c.App.Version, windowsArch(c, o)))
 	if o.output != "" {
 		out, _ = filepath.Abs(o.output)
 	}
@@ -614,12 +614,24 @@ func writeLinuxIcon(src, dst string) error {
 // desktopLdflags returns the linker flags for a target: app.ldflags,
 // plus on desktops the context actions and update settings.
 func desktopLdflags(c *config.Config, target string) string {
-	flags := c.App.Ldflags
+	flags := versionLdflags(c) + " " + strings.NewReplacer(
+		"{version}", c.App.Version,
+		"{build}", strconv.Itoa(c.App.Build),
+		"{id}", c.App.ID,
+	).Replace(c.App.Ldflags)
 	switch target {
 	case "windows", "macos", "linux":
 		flags += " " + c.ContextActionsLdflag() + " " + c.UpdateLdflags()
 	}
 	return strings.Join(strings.Fields(flags), " ")
+}
+
+// versionLdflags sets giode.AppVersion and giode.AppBuild, so the app
+// can show the version it was built as (the release tag in CI, through
+// $GIODE_VERSION). Apps on a giode without them link as before: -X
+// ignores missing variables.
+func versionLdflags(c *config.Config) string {
+	return fmt.Sprintf("-X github.com/mehran9675/giode.AppVersion=%s -X github.com/mehran9675/giode.AppBuild=%d", c.App.Version, c.App.Build)
 }
 
 // licensesWritten records projects whose app.licenses this run already

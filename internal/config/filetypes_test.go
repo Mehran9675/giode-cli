@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -47,5 +49,31 @@ func TestFileTypes(t *testing.T) {
 	c.FileTypes = append(c.FileTypes, FileType{Name: "bad", Extensions: []string{".dot"}})
 	if errs := c.validateFileTypes(); len(errs) != 1 {
 		t.Errorf("validate: %v", errs)
+	}
+}
+
+func TestNativePaths(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"angle/bin/libEGL.dll", "angle/bin/libGLESv2.dll", "msys/mingw64/bin/zlib1.dll"} {
+		p := filepath.Join(dir, filepath.FromSlash(f))
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, nil, 0o644)
+	}
+	t.Setenv("ANGLE_DIR", filepath.Join(dir, "angle"))
+	t.Setenv("MSYSTEM_PREFIX", filepath.Join(dir, "msys", "mingw64"))
+	c := &Config{Dir: dir, Native: Native{Windows: NativePlatform{
+		Search:    []string{"$MSYSTEM_PREFIX/bin", "msys/*/bin", "nowhere/*"},
+		Libraries: []string{"${ANGLE_DIR}/bin/lib*.dll", "%MSYSTEM_PREFIX%/bin/zlib1.dll"},
+	}}}
+	search, libs, _, err := c.NativeOptions("windows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(search) != 2 || len(libs) != 3 {
+		t.Errorf("search %v\nlibs %v", search, libs)
+	}
+	c.Native.Windows.Libraries = []string{"$NOT_SET_ANYWHERE/libmpv-2.dll"}
+	if _, _, _, err := c.NativeOptions("windows"); err == nil || !strings.Contains(err.Error(), "libmpv-2.dll") {
+		t.Errorf("missing library: %v", err)
 	}
 }

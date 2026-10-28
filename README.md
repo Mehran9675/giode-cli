@@ -101,7 +101,7 @@ The project file. Only `app.name` and `app.id` are required.
 name = "Pocket Agent"         # display name
 id = "com.example.agent"      # Android package name and Apple bundle ID
 version = "1.4.0"
-build = 12                    # Android versionCode, CFBundleVersion: raise per upload
+build = 12                    # Android versionCode, CFBundleVersion: raise per upload; giode.AppVersion and giode.AppBuild at run time
 icon = "assets/icon.png"      # square PNG, 1024x1024 for the stores
 package = "."                 # main package
 publisher = "Example Ltd"     # shown by installers and Windows' app list
@@ -112,7 +112,7 @@ links = ["https://example.com/app/*"]   # universal links / App Links; see giode
 tags = ""                     # Go build tags
 renderer = "opengl"           # Gio's OpenGL renderer on macOS and iOS (Config.Renderer)
 gio_patches = true            # build against Gio with giode's patches (default true)
-ldflags = ""                  # extra linker flags
+ldflags = ""                  # extra linker flags; {version}, {build} and {id} are replaced
 output = "dist"
 
 [android]
@@ -181,7 +181,7 @@ identity_name = "ExampleLtd.PocketAgent"   # reserved in Partner Center for the 
 
 [windows.winget]                     # giode build winget
 id = "Example.PocketAgent"
-installer_url = "https://example.com/download/PocketAgent-{version}-setup.exe"
+installer_url = "https://example.com/download/PocketAgent-{version}-{arch}-setup.exe"
 license = "MIT"
 
 [linux]
@@ -264,7 +264,7 @@ rest are unsigned.
 
 ## Windows installer
 
-`giode build windows-installer` makes `dist/windows/<App>-<version>-setup.exe` with NSIS:
+`giode build windows-installer` makes `dist/windows/<App>-<version>-<arch>-setup.exe` with NSIS:
 a wizard (welcome, optional license, folder, progress, finish with a "Run" box), a Start
 menu shortcut (and a desktop one with `desktop_shortcut`), an entry in Settings > Apps
 with publisher, version and size, and an uninstaller. By default it installs for the
@@ -275,14 +275,23 @@ current user into `%LOCALAPPDATA%\Programs`, without an administrator prompt;
 ## Patched Gio
 
 `giode build` and `giode run` build against a copy of your Gio version with giode's
-patches, adding the `giode_gio` build tag:
+patches, adding the `giode_gio` and `giode_gio2` build tags:
 
-- **Underlay hook**, on every platform: what giode's `Config.Underlay` and
-  `Config.Renderer` use to draw video or 3D under the UI. The window calls the hook with
-  the frame's render target before drawing the UI over it without clearing, Gio's OpenGL
-  renderer saves and restores the GL state around its frames, and on Windows it can prefer
-  OpenGL ES (ANGLE) over Direct3D. `renderer = "opengl"` under `[app]` adds the `nometal`
-  tag to macOS and iOS builds, for Gio's OpenGL renderer there.
+- **Underlay hooks**, on every platform: what giode's `Config.Underlay`,
+  `Config.UnderlayRelease` and `Config.Renderer` use to draw video or 3D under the UI. The
+  window calls the hook with the frame's render target before drawing the UI over it
+  without clearing, calls another once the UI is drawn (the MCP screenshot reads the frame
+  back there) and a third before releasing its GPU resources; Gio's OpenGL renderer saves
+  and restores the GL state around its frames, and on Windows it can prefer OpenGL ES
+  (ANGLE) over Direct3D. `renderer = "opengl"` under `[app]` adds the `nometal` tag to
+  macOS and iOS builds, for Gio's OpenGL renderer there.
+- **File drags on Linux**: XDND on X11 and `wl_data_device`'s drag and drop on Wayland,
+  for `Config.OnFileDrop` and `OnFileDrag`. Gio's event loop reads those protocols'
+  messages, so they can't be handled outside it.
+- **Minimized windows on Windows**: Gio took a minimized window for a restored one, so
+  `WindowMinimized`, desktop `OnBackground` and the way back from them never came.
+- **Input from automation**: the MCP server's `ui_pointer` and `ui_key` deliver pointer
+  and key events to the window's input as the platform would.
 
 And two Android fixes Gio hasn't released:
 
@@ -327,7 +336,8 @@ bundle = true
 exclude = ["libvulkan*"]              # never bundled
 
 [native.windows]
-search = ["C:/msys64/mingw64/bin"]    # where the DLLs are (MSYS2, a MinGW sysroot)
+search = ["$MSYSTEM_PREFIX/bin"]      # where the DLLs are (MSYS2, a MinGW sysroot)
+libraries = ["$MSYSTEM_PREFIX/bin/libEGL*.dll"]  # also bundled
 
 [native.macos]
 search = ["/opt/homebrew/lib"]
@@ -337,6 +347,21 @@ system = true                         # .deb and .rpm depend on the system's pac
 deb_depends = ["libmpv2"]             # the .rpm requires the libraries' sonames
 libraries = ["/usr/lib/x86_64-linux-gnu/libva-drm.so.2"]  # also bundled: plugins loaded at run time
 ```
+
+Paths in `search` and `libraries` may use environment variables (`$VAR`, `${VAR}`,
+`%VAR%`), `~/` and globs; relative paths are from giode.toml's folder. A `libraries`
+pattern that matches nothing is an error; a `search` folder that doesn't exist is skipped.
+Windows' imports include delay-loaded DLLs, and the Visual C++ runtime
+(`vcruntime140.dll`, `msvcp140.dll` and the rest) is bundled when found but not warned
+about when it isn't.
+
+With `renderer = "opengl"`, Windows builds need ANGLE's `libEGL.dll` and
+`libGLESv2.dll`, which the binary loads at run time rather than imports. giode bundles
+them without `[native]`: it looks in `[native.windows] search`, `$MSYSTEM_PREFIX/bin`,
+MSYS2's `clangarm64`, `clang64`, `ucrt64` and `mingw64` (under `$MSYS2_ROOT` or
+`C:\msys64`) and Visual Studio Code's install, taking the first pair built for the target
+CPU, along with the DLLs they import. `pacman -S mingw-w64-x86_64-angleproject` (or
+`mingw-w64-clang-aarch64-angleproject`) installs them.
 
 Libraries a binary imports that aren't the system's and aren't found are listed in a
 warning. `giode doctor` checks the tools: `install_name_tool` and `codesign` on macOS,
@@ -381,8 +406,22 @@ windows_msys2 = true
 [ci.setup]
 macos = "brew install mpv"
 linux = "sudo apt-get install -y libmpv-dev"
-windows = "pacman -S --noconfirm mingw-w64-x86_64-mpv"
+windows = "pacman -S --noconfirm ${MINGW_PACKAGE_PREFIX}-mpv"
 ```
+
+`arch` builds each desktop's packages for more CPUs. With `arm64`, Linux packages are
+also built on `ubuntu-24.04-arm`, and Windows ones cross-built for arm64 (or, with
+`windows_msys2`, built on `windows-11-arm` in MSYS2's CLANGARM64 environment, where
+`$MINGW_PACKAGE_PREFIX` is `mingw-w64-clang-aarch64`). macOS' dmg is universal already.
+
+```toml
+[ci]
+arch = ["amd64", "arm64"]   # default ["amd64"]
+```
+
+Every package's name carries its CPU, so builds for two CPUs can share a release:
+`<App>-<version>-<arch>-setup.exe`, `<App>-<version>-<arch>.msix` and
+`<App>-<version>-universal.dmg` (or `-arm64`/`-amd64` with a single `-arch`).
 
 ## Android libraries
 

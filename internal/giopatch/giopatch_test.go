@@ -68,13 +68,16 @@ func TestPrepare(t *testing.T) {
 		t.Error("the app's go.mod was changed")
 	}
 
-	// The underlay hook builds on the platforms buildable here.
+	// The underlay and file drag hooks build on the platforms buildable here.
 	write("main.go", `package main
 
 import "gioui.org/app"
 
 func main() {
 	app.GiodeSetUnderlay(func(t app.GiodeTarget) { _ = t.Framebuffer }, true)
+	app.GiodeSetUnderlayHooks(func() {}, func(app.GiodeTarget) {})
+	app.GiodeSetFileDrag(func(kind int, x, y float32, uris string) {})
+	new(app.Window).GiodeInject(nil)
 }
 `)
 	for _, env := range [][]string{{"GOOS=linux"}, {"GOOS=windows"}, {"GOOS=js", "GOARCH=wasm"}} {

@@ -128,7 +128,9 @@ func (c *collector) visit(file string, main bool) error {
 		}
 		p := c.find(ref, name, file)
 		if p == "" {
-			c.missing[name] = true
+			if !(c.o.GOOS == "windows" && windowsRedist[strings.TrimSuffix(strings.ToLower(name), ".dll")]) {
+				c.missing[name] = true
+			}
 			continue
 		}
 		c.seen[k] = &Lib{Name: name, Path: p, Refs: []string{ref}}
@@ -159,8 +161,7 @@ func (c *collector) imports(file string) ([]string, []string, error) {
 			return nil, nil, err
 		}
 		defer f.Close()
-		libs, err := f.ImportedLibraries()
-		return libs, nil, err
+		return peImports(f), nil, nil
 	case "linux", "freebsd":
 		f, err := elf.Open(file)
 		if err != nil {
@@ -328,9 +329,17 @@ func init() {
 		iphlpapi kernel32 kernelbase mf mfplat mfreadwrite mfuuid mmdevapi msimg32 msvcrt mswsock ncrypt
 		netapi32 normaliz ntdll ole32 oleaut32 opengl32 powrprof propsys psapi rpcrt4 secur32 setupapi
 		shcore shell32 shlwapi user32 userenv usp10 uxtheme version winhttp wininet winmm winspool ws2_32
-		wsock32 wtsapi32 xinput1_4 avrt ucrtbase vcruntime140 msvcp140 dinput8 dxcore mscms`) {
+		wsock32 wtsapi32 xinput1_4 avrt ucrtbase dinput8 dxcore mscms`) {
 		windowsSystem[n] = true
 	}
+}
+
+// windowsRedist are Microsoft's C++ runtime DLLs: on most Windows PCs
+// but not all, so they're bundled when found in the search directories,
+// and not reported when they aren't.
+var windowsRedist = map[string]bool{
+	"vcruntime140": true, "vcruntime140_1": true, "msvcp140": true, "msvcp140_1": true,
+	"msvcp140_2": true, "concrt140": true, "vcomp140": true,
 }
 
 // linuxSystem are libraries a Linux desktop has and a package mustn't
