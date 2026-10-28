@@ -110,33 +110,41 @@ func cmdCert(args []string) error {
 }
 
 // setTOMLValue adds key = value to a table of giode.toml, creating the
-// table at the end when there's none.
+// table at the end when there's none. The file's line endings are kept
+// (a giode.toml checked out on Windows can have CRLF ones).
 func setTOMLValue(tomlPath, table, key, value string) error {
 	b, err := os.ReadFile(tomlPath)
 	if err != nil {
 		return err
 	}
-	line := fmt.Sprintf("%s = %q", key, value)
 	s := string(b)
-	header := "[" + table + "]\n"
-	if i := strings.Index(s, header); i >= 0 && (i == 0 || s[i-1] == '\n') {
+	nl := "\n"
+	if strings.Contains(s, "\r\n") {
+		nl = "\r\n"
+	}
+	line := fmt.Sprintf("%s = %q", key, value) + nl
+	header := "[" + table + "]"
+	lines := strings.SplitAfter(s, "\n")
+	for i, l := range lines {
+		if strings.TrimSpace(l) != header {
+			continue
+		}
 		// After the table's lines, before the next table or blank line,
 		// so it follows the commented examples.
-		at := i + len(header)
-		for at < len(s) {
-			end := strings.IndexByte(s[at:], '\n')
-			if end < 0 {
-				end = len(s) - at - 1
-			}
-			l := strings.TrimSpace(s[at : at+end])
-			if l == "" || strings.HasPrefix(l, "[") {
+		at := i + 1
+		for at < len(lines) {
+			t := strings.TrimSpace(lines[at])
+			if t == "" || strings.HasPrefix(t, "[") {
 				break
 			}
-			at += end + 1
+			at++
 		}
-		s = s[:at] + line + "\n" + s[at:]
-	} else {
-		s = strings.TrimRight(s, "\n") + "\n\n" + header + line + "\n"
+		if at == len(lines) && !strings.HasSuffix(s, "\n") {
+			line = nl + line
+		}
+		out := strings.Join(lines[:at], "") + line + strings.Join(lines[at:], "")
+		return os.WriteFile(tomlPath, []byte(out), 0o644)
 	}
+	s = strings.TrimRight(s, "\r\n") + nl + nl + header + nl + line
 	return os.WriteFile(tomlPath, []byte(s), 0o644)
 }

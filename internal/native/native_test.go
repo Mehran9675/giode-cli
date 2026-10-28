@@ -92,8 +92,12 @@ func TestLookupFoldsCaseOnWindows(t *testing.T) {
 	if p := lookup(dir, "libmpv-2.dll", true); !strings.HasSuffix(p, "LIBMPV-2.DLL") {
 		t.Errorf("windows lookup: %q", p)
 	}
-	if p := lookup(dir, "libmpv-2.dll", false); p != "" {
-		t.Errorf("case-sensitive lookup found %q", p)
+	// On a case-insensitive file system (macOS, Windows) the plain
+	// lookup finds it too.
+	if _, err := os.Stat(filepath.Join(dir, "libmpv-2.dll")); err != nil {
+		if p := lookup(dir, "libmpv-2.dll", false); p != "" {
+			t.Errorf("case-sensitive lookup found %q", p)
+		}
 	}
 	c := &collector{o: Options{GOOS: "windows"}}
 	if !c.system("KERNEL32.dll", "KERNEL32.dll") || !c.system("api-ms-win-crt-runtime-l1-1-0.dll", "api-ms-win-crt-runtime-l1-1-0.dll") || c.system("libmpv-2.dll", "libmpv-2.dll") {

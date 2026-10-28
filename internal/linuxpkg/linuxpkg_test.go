@@ -145,7 +145,10 @@ func TestAppDir(t *testing.T) {
 			t.Error(err)
 		}
 	}
-	// AppRun runs the program.
+	// AppRun runs the program, where Linux programs run.
+	if runtime.GOOS != "linux" {
+		return
+	}
 	if b, err := exec.Command(filepath.Join(dir, "AppRun")).Output(); err != nil || strings.TrimSpace(string(b)) != "hello from giode" {
 		t.Errorf("AppRun printed %q (%v)", b, err)
 	}

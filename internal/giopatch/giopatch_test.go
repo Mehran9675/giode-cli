@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -80,7 +81,15 @@ func main() {
 	new(app.Window).GiodeInject(nil)
 }
 `)
-	for _, env := range [][]string{{"GOOS=linux"}, {"GOOS=windows"}, {"GOOS=js", "GOARCH=wasm"}} {
+	envs := [][]string{{"GOOS=windows"}, {"GOOS=js", "GOARCH=wasm"}}
+	// Gio's Linux backends are cgo: they build on Linux, with the
+	// X11, Wayland and xkbcommon headers.
+	if runtime.GOOS == "linux" && exec.Command("pkg-config", "--exists", "x11", "wayland-client", "xkbcommon", "egl").Run() == nil {
+		envs = append(envs, []string{"GOOS=linux"})
+	} else {
+		t.Log("not building for Linux: needs Linux with Gio's development packages")
+	}
+	for _, env := range envs {
 		cmd := exec.Command("go", "build", "-modfile="+modfile, "-o", os.DevNull, ".")
 		cmd.Dir = app
 		cmd.Env = append(os.Environ(), env...)

@@ -87,24 +87,34 @@ func cmdSelfUpdate(args []string) error {
 }
 
 func latestRelease(client *http.Client) (string, error) {
-	resp, err := client.Get("https://api.github.com/repos/" + releaseRepo + "/releases/latest")
+	// The release list, newest first: GitHub's releases/latest leaves
+	// out pre-releases, and giode's are alphas for now.
+	resp, err := client.Get("https://api.github.com/repos/" + releaseRepo + "/releases?per_page=20")
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return "", errors.New("no giode release is published yet; install with go install github.com/mehran9675/giode-cli/cmd/giode@latest")
-	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("checking the latest release: %s", resp.Status)
 	}
-	var r struct {
+	var rs []struct {
 		TagName string `json:"tag_name"`
+		Draft   bool   `json:"draft"`
+		Assets  []struct {
+			Name string `json:"name"`
+		} `json:"assets"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&rs); err != nil {
 		return "", err
 	}
-	return r.TagName, nil
+	for _, r := range rs {
+		// One with archives: a release is published before they're
+		// uploaded.
+		if !r.Draft && len(r.Assets) > 0 {
+			return r.TagName, nil
+		}
+	}
+	return "", errors.New("no giode release is published yet; install with go install github.com/mehran9675/giode-cli/cmd/giode@latest")
 }
 
 // extractBinary returns the giode executable from a release archive.

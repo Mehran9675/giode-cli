@@ -22,11 +22,20 @@ case "$(uname -m)" in
   *) echo "giode: unsupported processor $(uname -m)" >&2; exit 1 ;;
 esac
 
-if [ -n "${GIODE_VERSION:-}" ]; then
-  url="https://github.com/$repo/releases/download/$GIODE_VERSION/giode_${os}_${arch}.tar.gz"
-else
-  url="https://github.com/$repo/releases/latest/download/giode_${os}_${arch}.tar.gz"
+version="${GIODE_VERSION:-}"
+if [ -z "$version" ] && [ -z "${GIODE_DOWNLOAD_URL:-}" ]; then
+  # The newest release with archives, pre-releases included: GitHub's
+  # releases/latest leaves those out, and giode's are alphas for now.
+  version=$(curl -fsSL "https://api.github.com/repos/$repo/releases?per_page=20" |
+    awk -v want="giode_${os}_${arch}.tar.gz" '
+      /"tag_name":/ { gsub(/.*"tag_name": *"|".*/, ""); tag = $0 }
+      /"name":/ && index($0, want) && tag != "" { print tag; exit }')
+  if [ -z "$version" ]; then
+    echo "giode: no release for ${os}/${arch} is published yet; install with: go install github.com/mehran9675/giode-cli/cmd/giode@latest" >&2
+    exit 1
+  fi
 fi
+url="https://github.com/$repo/releases/download/$version/giode_${os}_${arch}.tar.gz"
 
 if [ -n "${GIODE_DOWNLOAD_URL:-}" ]; then
   url="${GIODE_DOWNLOAD_URL%/}/giode_${os}_${arch}.tar.gz"

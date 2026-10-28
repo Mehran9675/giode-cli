@@ -79,6 +79,29 @@ func TestSetTOMLValue_AfterComments(t *testing.T) {
 	}
 }
 
+// TestSetTOMLValue_CRLF finds the table in a giode.toml with Windows
+// line endings rather than adding a second one, which TOML rejects.
+func TestSetTOMLValue_CRLF(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "giode.toml")
+	os.WriteFile(p, []byte("[windows.signing]\r\n# certificate = \"x.pfx\"\r\n\r\n[web]\r\nport = 1\r\n"), 0o644)
+	if err := setTOMLValue(p, "windows.signing", "certificate", "codesign.pfx"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(p)
+	want := "[windows.signing]\r\n# certificate = \"x.pfx\"\r\ncertificate = \"codesign.pfx\"\r\n\r\n[web]\r\nport = 1\r\n"
+	if string(b) != want {
+		t.Errorf("got %q\nwant %q", b, want)
+	}
+	// A table that isn't there yet is added at the end.
+	if err := setTOMLValue(p, "android", "keystore", "release.keystore"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(p)
+	if want += "\r\n[android]\r\nkeystore = \"release.keystore\"\r\n"; string(b) != want {
+		t.Errorf("got %q\nwant %q", b, want)
+	}
+}
+
 func TestReplaceExecutable(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "giode")
 	os.WriteFile(p, []byte("old"), 0o755)

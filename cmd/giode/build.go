@@ -413,11 +413,6 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 		if g.MinSDK == 0 {
 			g.MinSDK = 15
 		}
-		// Go's cgo build of the iOS runtime needs an explicit deployment
-		// target, or clang gets -miphoneos-version-min=0.0.
-		if os.Getenv("IPHONEOS_DEPLOYMENT_TARGET") == "" {
-			os.Setenv("IPHONEOS_DEPLOYMENT_TARGET", strconv.Itoa(g.MinSDK)+".0")
-		}
 		plist, err := c.IOSPlist()
 		if err != nil {
 			return g, err

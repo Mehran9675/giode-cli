@@ -2,10 +2,17 @@ name: Release
 
 # Pushing a tag like v0.2.0 builds giode for every platform and publishes
 # a GitHub release with the archives install.sh, install.ps1 and
-# giode self-update download.
+# giode self-update download. Run it by hand with a tag to (re)publish
+# the archives of an existing tag: a release made without them gets
+# them added.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to build and publish (an existing one, like v0.1.1-alpha.1)
+        required: true
 
 permissions:
   contents: write
@@ -13,15 +20,22 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
+      - name: Install Gio dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev libxkbcommon-x11-dev \
+            libgles2-mesa-dev libegl1-mesa-dev libffi-dev libxcursor-dev libxfixes-dev libvulkan-dev
       - run: go test ./...
       - name: Build
-        env:
-          VERSION: ${{ github.ref_name }}
         run: |
           mkdir -p out
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
@@ -30,7 +44,7 @@ jobs:
             mkdir -p "$dir"
             bin=giode; [ "$os" = windows ] && bin=giode.exe
             CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
-              -ldflags "-s -w -X main.version=$VERSION" -o "$dir/$bin" ./cmd/giode
+              -ldflags "-s -w -X main.version=$TAG" -o "$dir/$bin" ./cmd/giode
             cp LICENSE NOTICE README.md "$dir/"
             if [ "$os" = windows ]; then
               (cd "$dir" && zip -q -r "../out/$dir.zip" .)
@@ -43,4 +57,11 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" out/* --title "$GITHUB_REF_NAME" --generate-notes
+        run: |
+          # A tag with "-" (v0.2.0-alpha.1) is a pre-release.
+          pre=""; case "$TAG" in *-*) pre="--prerelease" ;; esac
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/* --clobber
+          else
+            gh release create "$TAG" out/* --title "$TAG" --generate-notes $pre
+          fi

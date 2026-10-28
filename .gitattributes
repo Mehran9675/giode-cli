@@ -1,0 +1,6 @@
+# Keep LF line endings in checkouts on Windows too: giode new copies
+# its templates (embedded from these files) into projects.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.dll binary
