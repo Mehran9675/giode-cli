@@ -9,7 +9,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/mehran9675/giode-cli/internal/config"
 	"github.com/mehran9675/giode-cli/internal/native"
@@ -89,9 +91,39 @@ func angleDirs() []string {
 	for _, p := range []string{filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "Microsoft VS Code"), `C:\Program Files\Microsoft VS Code`} {
 		if !strings.HasPrefix(p, "Programs") {
 			dirs = append(dirs, p)
+			dirs = append(dirs, newestFirst(p)...)
 		}
 	}
 	return dirs
+}
+
+// newestFirst returns dir's subfolders, most recently changed first:
+// VS Code keeps its DLLs in a folder named after its build, and an
+// update leaves the old one beside the new.
+func newestFirst(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	type sub struct {
+		path string
+		mod  time.Time
+	}
+	var subs []sub
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if info, err := e.Info(); err == nil {
+			subs = append(subs, sub{filepath.Join(dir, e.Name()), info.ModTime()})
+		}
+	}
+	sort.Slice(subs, func(i, j int) bool { return subs[i].mod.After(subs[j].mod) })
+	out := make([]string, len(subs))
+	for i, s := range subs {
+		out[i] = s.path
+	}
+	return out
 }
 
 // findANGLE finds libEGL.dll and libGLESv2.dll for the executable's CPU,
@@ -143,8 +175,14 @@ func copyLibs(libs []native.Lib, dir string) ([]string, error) {
 	return out, nil
 }
 
-// copyLib copies src (following links) to dst, writable.
+// copyLib copies src (following links) to dst, writable. A file isn't
+// copied onto itself.
 func copyLib(src, dst string) error {
+	if si, err := os.Stat(src); err == nil {
+		if di, err := os.Stat(dst); err == nil && os.SameFile(si, di) {
+			return nil
+		}
+	}
 	in, err := os.Open(src)
 	if err != nil {
 		return err

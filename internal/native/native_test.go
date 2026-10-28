@@ -163,6 +163,30 @@ func TestCollectWindowsDLLs(t *testing.T) {
 	}
 }
 
+// TestCollectWindowsRebuild doesn't take the DLLs beside the program -
+// the output folder, holding the last build's copies - over the search
+// folders'.
+func TestCollectWindowsRebuild(t *testing.T) {
+	dir := "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows"
+	b, err := os.ReadFile(filepath.Join(dir, "d3dx9_43.dll"))
+	if err != nil {
+		t.Skip("no Wine DLLs to read")
+	}
+	out := t.TempDir()
+	exe := filepath.Join(out, "app.exe")
+	os.WriteFile(exe, b, 0o755)
+	os.WriteFile(filepath.Join(out, "d3dxof.dll"), []byte("stale"), 0o644)
+	r, err := Collect(exe, Options{GOOS: "windows", Search: []string{dir}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range r.Libs {
+		if strings.EqualFold(l.Name, "d3dxof.dll") && filepath.Dir(l.Path) != dir {
+			t.Errorf("d3dxof.dll from %s, want the search folder", l.Path)
+		}
+	}
+}
+
 func containsFold(s []string, v string) bool {
 	for _, x := range s {
 		if strings.EqualFold(x, v) {
