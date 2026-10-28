@@ -295,6 +295,9 @@ patches, adding the `giode_gio` and `giode_gio2` build tags:
   messages, so they can't be handled outside it.
 - **Minimized windows on Windows**: Gio took a minimized window for a restored one, so
   `WindowMinimized`, desktop `OnBackground` and the way back from them never came.
+- **Fullscreen on Windows**: Gio showed a fullscreen window maximized without its frame,
+  and Windows draws the taskbar over maximized windows. The patched copy makes it a popup
+  covering the monitor, and puts it back where and as it was when leaving fullscreen.
 - **Input from automation**: the MCP server's `ui_pointer` and `ui_key` deliver pointer
   and key events to the window's input as the platform would.
 
