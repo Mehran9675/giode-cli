@@ -20,6 +20,7 @@ import (
 	"runtime/debug"
 	"sort"
 	"strings"
+	"time"
 )
 
 // subcommand is a giode command.
@@ -79,12 +80,20 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+	start := time.Now()
 	if err := c.run(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return
 		}
-		fmt.Fprintf(os.Stderr, "giode %s: %v\n", c.name, err)
+		if timedCommands[c.name] {
+			fmt.Fprintf(os.Stderr, "giode %s: %v%s\n", c.name, err, after(start))
+		} else {
+			fmt.Fprintf(os.Stderr, "giode %s: %v\n", c.name, err)
+		}
 		os.Exit(1)
+	}
+	if timedCommands[c.name] {
+		fmt.Printf("Done in %s.\n", since(start))
 	}
 }
 

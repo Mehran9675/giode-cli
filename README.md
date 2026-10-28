@@ -54,7 +54,7 @@ target needs.
 | `giode build` (no target) | Builds the platforms in `app.platforms` that this computer can, saying which it skips. |
 | `giode init` | Adds `giode.toml` to an existing Go module. |
 | `giode build <target>...` | Builds into `dist/<platform>`. Targets: `android` (APK), `aab` (Play bundle), `ios` (IPA), `ios-sim`, `macos` (universal), `dmg`, `windows`, `windows-installer` (setup program), `msix`, `winget`, `linux`, `deb`, `rpm`, `appimage`, `flatpak`, `web`, `desktop` (this computer) and `all` (everything this computer can build). `-release` signs with your certificates. |
-| `giode run [target]` | Builds for a target and runs it: `desktop` (default, with `go run`), `linux`, `windows` (Wine off Windows), `windows-installer`, `macos`, `android` (builds the device's architecture, installs, launches, follows the log), `ios-sim`, `web` (serves `dist/web`). `-mcp` starts giode's MCP server so an AI agent can drive the app. |
+| `giode run [target]` | Builds for a target and runs it: `desktop` (default: `go build`, then the program), `linux`, `windows` (Wine off Windows), `windows-installer`, `macos`, `android` (builds the device's architecture, installs, launches, follows the log), `ios-sim`, `web` (serves `dist/web`). `-mcp` starts giode's MCP server so an AI agent can drive the app. |
 | `giode devices` | Lists Android devices and booted iOS simulators. |
 | `giode doctor` | Checks Go, the Android SDK, build tools, platform, NDK and JDK, Xcode, and Gio's Linux libraries, with install commands for what's missing. |
 | `giode keystore` | Creates an Android release keystore and points `giode.toml` at it. |
@@ -74,6 +74,11 @@ target needs.
 Every command takes `-C dir` to run on a project elsewhere, and build commands take `-x`
 to print what they run. Targets have short names too: `apk`, `bundle`, `win`, `mac`,
 `sim`, `installer`, `browser`.
+
+`build`, `release`, `upgrade`, `self-update`, `licenses` and `clean` print how long they
+took when they finish (`Done in 21.3s.`), and `build` and `release` each target's time next
+to its output. `run` prints how long the build (and on a device, the install) took before
+the app starts.
 
 ### What builds where
 

@@ -74,8 +74,24 @@ func cmdRun(args []string) error {
 			return err
 		}
 		defer gb.cleanup()
-		args := append(append([]string{"run", "-ldflags", desktopLdflags(c, hostTarget())}, gb.goArgs()...), pkgPath(c))
-		return run(command(c, "go", append(args, appArgs...)...))
+		// go build, then run: what go run does, with the build timed.
+		tmp, err := os.MkdirTemp("", "giode-run-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(tmp)
+		bin := filepath.Join(tmp, binaryName(c))
+		if runtime.GOOS == "windows" {
+			bin += ".exe"
+		}
+		fmt.Println("Building…")
+		start := time.Now()
+		args := append(append([]string{"build", "-o", bin, "-ldflags", desktopLdflags(c, hostTarget())}, gb.goArgs()...), pkgPath(c))
+		if err := run(command(c, "go", args...)); err != nil {
+			return err
+		}
+		fmt.Printf("Built in %s. Running %s\n", since(start), c.App.Name)
+		return run(command(c, bin, appArgs...))
 	case "linux":
 		if runtime.GOOS != "linux" {
 			return errors.New("the Linux app runs on Linux; use giode run here, or run it in a Linux VM")
@@ -127,11 +143,12 @@ func cmdRun(args []string) error {
 // built builds target, printing what it's doing.
 func built(c *config.Config, target string, o buildOpts) (string, error) {
 	fmt.Printf("Building %s…\n", target)
+	start := time.Now()
 	out, err := buildTarget(c, target, o)
 	if err != nil {
 		return "", err
 	}
-	fmt.Printf("Running %s\n", relPath(out))
+	fmt.Printf("Built in %s. Running %s\n", since(start), relPath(out))
 	return out, nil
 }
 
@@ -184,14 +201,17 @@ func runAndroid(c *config.Config, device string, o buildOpts) error {
 		return fmt.Errorf("unknown device ABI %q", abi)
 	}
 	fmt.Printf("Building for %s (%s)…\n", abi, o.arch)
+	start := time.Now()
 	apk, err := buildTarget(c, "android", o)
 	if err != nil {
 		return err
 	}
-	fmt.Println("Installing…")
+	fmt.Printf("Built in %s. Installing…\n", since(start))
+	installStart := time.Now()
 	if err := run(command(c, adbPath, "install", "-r", "-d", apk)); err != nil {
 		return err
 	}
+	fmt.Printf("Installed in %s.\n", since(installStart))
 	// Clear old log lines, start the app and follow its log.
 	run(command(c, adbPath, "logcat", "-c"))
 	if err := run(command(c, adbPath, "shell", "monkey", "-p", c.App.ID, "-c", "android.intent.category.LAUNCHER", "1")); err != nil {
@@ -244,22 +264,30 @@ func runIOSSim(c *config.Config, udid string, appArgs []string) error {
 			return errors.New("no simulator is booted: open Simulator.app, or run xcrun simctl boot <device>")
 		}
 	}
+	fmt.Println("Building ios-sim…")
+	start := time.Now()
 	app, err := buildTarget(c, "ios-sim", buildOpts{})
 	if err != nil {
 		return err
 	}
+	fmt.Printf("Built in %s. Installing…\n", since(start))
+	installStart := time.Now()
 	if err := run(command(c, "xcrun", "simctl", "install", udid, app)); err != nil {
 		return err
 	}
+	fmt.Printf("Installed in %s.\n", since(installStart))
 	args := append([]string{"simctl", "launch", "--console-pty", "--terminate-running-process", udid, c.App.ID}, appArgs...)
 	return run(command(c, "xcrun", args...))
 }
 
 func runWeb(c *config.Config) error {
+	fmt.Println("Building web…")
+	start := time.Now()
 	d, err := buildTarget(c, "web", buildOpts{})
 	if err != nil {
 		return err
 	}
+	fmt.Printf("Built in %s.\n", since(start))
 	addr := "127.0.0.1:" + strconv.Itoa(c.Web.Port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {

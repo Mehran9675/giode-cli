@@ -153,6 +153,7 @@ func cmdRelease(args []string) error {
 	f := feed{Version: c.App.Version, Notes: strings.TrimSpace(*notes), Date: time.Now().UTC().Format(time.RFC3339), Assets: map[string]asset{}}
 	for _, t := range expandTargets(targets) {
 		fmt.Printf("Building %s…\n", t)
+		start := time.Now()
 		built, err := buildTarget(c, t, buildOpts{release: true})
 		if err != nil {
 			return fmt.Errorf("%s: %w", t, err)
@@ -196,7 +197,7 @@ func cmdRelease(args []string) error {
 			url = strings.TrimRight(*baseURL, "/") + "/" + name
 		}
 		f.Assets[platform] = asset{URL: url, SHA256: sum, Size: size, Kind: kind}
-		fmt.Printf("  %s\n", relPath(dst))
+		fmt.Printf("  %s (%s)\n", relPath(dst), since(start))
 	}
 	body, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
