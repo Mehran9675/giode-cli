@@ -53,8 +53,10 @@ func TestPrepare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(src), "giode: ask for the next frame") {
-		t.Error("os_android.go isn't patched")
+	for _, want := range []string{"giode: ask for the next frame", "func snippetsAgree"} {
+		if !strings.Contains(string(src), want) {
+			t.Errorf("os_android.go lacks %q", want)
+		}
 	}
 	if _, err := parser.ParseFile(token.NewFileSet(), "os_android.go", src, 0); err != nil {
 		t.Errorf("patched os_android.go doesn't parse: %v", err)

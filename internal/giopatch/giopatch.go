@@ -1,5 +1,6 @@
 // Package giopatch builds apps against a patched copy of Gio, for fixes
-// Gio hasn't released yet. The copy lives in the user cache directory;
+// Gio hasn't released yet: on Android, rendering at the display's
+// refresh rate and keeping held keys repeating. The copy lives in the user cache directory;
 // the app's go.mod is left alone: the build gets a temporary copy of it
 // with a replace directive, passed with -modfile to the go build and go
 // list commands run in the app's module. (Not through GOFLAGS: go
@@ -24,7 +25,7 @@ type patch struct {
 
 // revision changes whenever the patches do, so cached copies made with
 // older patches aren't used.
-const revision = "1"
+const revision = "2"
 
 // androidPacing makes Android render at the display's refresh rate.
 // Gio asks the Choreographer for the next frame only after presenting
@@ -73,8 +74,58 @@ var androidPacing = []patch{
 	},
 }
 
+// androidKeyRepeat keeps a held key repeating. After every edit Gio
+// compares the snippet of text the keyboard was given with the
+// editor's, and restarts the keyboard's input connection when they
+// differ - which they do after any edit, because the editor moves its
+// snippet window along with the text. Restarting cancels the
+// keyboard's key repeat, so holding backspace deleted one character.
+// The keyboard reads text on demand, so it only needs a restart when
+// the text changed under it: unless one snippet lies within the other
+// with the same text (the editor just moved its window).
+var androidKeyRepeat = []patch{
+	{
+		file: "app/os_android.go",
+		old: `		if old.Snippet != new.Snippet {
+			callVoidMethod(env, w.view, gioView.restartInput)
+			return
+		}
+`,
+		new: `		if old.Snippet != new.Snippet && !snippetsAgree(old.Snippet, new.Snippet) {
+			// giode: only when the text changed under the keyboard;
+			// a restart cancels its key repeat.
+			callVoidMethod(env, w.view, gioView.restartInput)
+			return
+		}
+`,
+	},
+	{
+		file: "app/os_android.go",
+		old: `func (w *window) ShowTextInput(show bool) {
+`,
+		new: `// snippetsAgree reports whether one snippet of the editor's text lies
+// within the other with the same text: the editor only moved its
+// window over text the keyboard already knows (giode).
+func snippetsAgree(a, b key.Snippet) bool {
+	ar, br := []rune(a.Text), []rune(b.Text)
+	if (len(ar) == 0) != (len(br) == 0) {
+		return false
+	}
+	as, bs := min(a.Start, a.End), min(b.Start, b.End)
+	start, end := max(as, bs), min(as+len(ar), bs+len(br))
+	if end-start != min(len(ar), len(br)) {
+		return false
+	}
+	return string(ar[start-as:end-as]) == string(br[start-bs:end-bs])
+}
+
+func (w *window) ShowTextInput(show bool) {
+`,
+	},
+}
+
 // Android is the set of patches for Android builds.
-var Android = androidPacing
+var Android = append(append([]patch{}, androidPacing...), androidKeyRepeat...)
 
 // ErrSkipped is returned, wrapped, when a module can't be patched:
 // it replaces or vendors Gio itself, or uses a workspace.
