@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "image/jpeg"
 
@@ -112,13 +113,14 @@ func cmdBuild(args []string) error {
 	var failed []string
 	for _, t := range targets {
 		fmt.Printf("Building %s…\n", t)
+		start := time.Now()
 		out, err := buildTarget(c, t, o)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "giode build %s: %v\n", t, err)
+			fmt.Fprintf(os.Stderr, "giode build %s: %v%s\n", t, err, after(start))
 			failed = append(failed, t)
 			continue
 		}
-		fmt.Printf("  %s\n", relPath(out))
+		fmt.Printf("  %s (%s)\n", relPath(out), since(start))
 	}
 	if len(failed) > 0 {
 		return fmt.Errorf("failed: %s", strings.Join(failed, ", "))
