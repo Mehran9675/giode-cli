@@ -149,6 +149,33 @@ type Windows struct {
 	Arch      string           `toml:"arch"`
 	Signing   WindowsSigning   `toml:"signing"`
 	Installer WindowsInstaller `toml:"installer"`
+	MSIX      WindowsMSIX      `toml:"msix"`
+	Winget    WindowsWinget    `toml:"winget"`
+}
+
+// WindowsMSIX configures MSIX packages (giode build msix), for the
+// Microsoft Store and App Installer.
+type WindowsMSIX struct {
+	// Publisher is the signing certificate's subject ("CN=Example
+	// Ltd"), or the publisher ID Partner Center gives for the Store.
+	Publisher string `toml:"publisher"`
+	// IdentityName is the package name; the Store reserves it. The app
+	// ID by default.
+	IdentityName string `toml:"identity_name"`
+	// PublisherDisplayName is the publisher shown; app.publisher by
+	// default.
+	PublisherDisplayName string `toml:"publisher_display_name"`
+}
+
+// WindowsWinget configures winget manifests (giode build winget).
+type WindowsWinget struct {
+	// ID is the package identifier, Publisher.App.
+	ID string `toml:"id"`
+	// InstallerURL is where users download the setup program; {version}
+	// is replaced with the version.
+	InstallerURL string `toml:"installer_url"`
+	// License is the app's license, as shown by winget.
+	License string `toml:"license"`
 }
 
 // WindowsSigning signs release builds and installers with an

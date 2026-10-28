@@ -9,6 +9,8 @@ import (
 
 	"github.com/mehran9675/giode-cli/internal/config"
 	"github.com/mehran9675/giode-cli/internal/linuxpkg"
+	"github.com/mehran9675/giode-cli/internal/msix"
+	"github.com/mehran9675/giode-cli/internal/winget"
 )
 
 // linuxApp describes the built Linux binary bin for packaging.
@@ -89,4 +91,96 @@ func debArch(goarch string) string {
 		return "armhf"
 	}
 	return goarch
+}
+
+// buildMSIX builds the Windows executable and packages it as MSIX,
+// signed with windows.signing when building for release.
+func buildMSIX(c *config.Config, o buildOpts) (string, error) {
+	exeOpts := o
+	exeOpts.output = ""
+	exeOpts.release = false // the package is signed, not the program inside
+	exe, err := buildTarget(c, "windows", exeOpts)
+	if err != nil {
+		return "", err
+	}
+	arch := o.arch
+	if arch == "" {
+		arch = c.Windows.Arch
+	}
+	if arch == "" {
+		arch = "amd64"
+	}
+	out := filepath.Join(filepath.Dir(exe), fmt.Sprintf("%s-%s-%s.msix", binaryName(c), c.App.Version, arch))
+	if o.output != "" {
+		out, _ = filepath.Abs(o.output)
+	}
+	m := c.Windows.MSIX
+	name := m.IdentityName
+	if name == "" {
+		name = c.App.ID
+	}
+	display := m.PublisherDisplayName
+	if display == "" {
+		display = c.App.Publisher
+	}
+	var protocols []string
+	protocols = append(protocols, c.App.Schemes...)
+	if err := msix.Write(msix.App{
+		Name: c.App.Name, IdentityName: name, Publisher: m.Publisher, PublisherDisplayName: display,
+		Description: c.App.Description, Version: c.App.Version, Exe: exe, Icon: c.Path(c.App.Icon),
+		Arch: arch, Protocols: protocols,
+	}, out); err != nil {
+		return "", err
+	}
+	if o.release {
+		if err := signWindows(c, out); err != nil {
+			return "", err
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "  note: the package is unsigned; Windows installs only signed MSIX packages (use -release with windows.signing)")
+	}
+	return out, nil
+}
+
+// buildWinget builds the setup program and writes winget manifests for
+// it.
+func buildWinget(c *config.Config, o buildOpts) (string, error) {
+	setupOpts := o
+	setupOpts.output = ""
+	setup, err := buildWindowsInstaller(c, setupOpts)
+	if err != nil {
+		return "", err
+	}
+	w := c.Windows.Winget
+	id := w.ID
+	if id == "" {
+		id = wingetName(c.App.Publisher) + "." + wingetName(c.App.Name)
+	}
+	arch := o.arch
+	if arch == "" {
+		arch = c.Windows.Arch
+	}
+	dir := filepath.Join(filepath.Dir(setup), "winget")
+	if o.output != "" {
+		dir, _ = filepath.Abs(o.output)
+	}
+	return winget.Write(winget.App{
+		ID: id, Name: c.App.Name, Version: c.App.Version, Publisher: c.App.Publisher,
+		Description: c.App.Description, License: w.License, Website: c.App.Website, ProductCode: c.App.ID,
+		Installer: setup, InstallerURL: w.InstallerURL, PerMachine: c.Windows.Installer.PerMachine, Arch: arch,
+	}, dir)
+}
+
+// wingetName makes an identifier part from a name: letters and digits.
+func wingetName(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "App"
+	}
+	return b.String()
 }
