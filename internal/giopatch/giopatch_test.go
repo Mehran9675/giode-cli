@@ -33,7 +33,7 @@ func TestPrepare(t *testing.T) {
 	}
 	t.Setenv("GOFLAGS", "")
 
-	modfile, cleanup, err := Prepare(app, Android)
+	modfile, cleanup, err := Prepare(app, All)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,8 +68,26 @@ func TestPrepare(t *testing.T) {
 		t.Error("the app's go.mod was changed")
 	}
 
+	// The underlay hook builds on the platforms buildable here.
+	write("main.go", `package main
+
+import "gioui.org/app"
+
+func main() {
+	app.GiodeSetUnderlay(func(t app.GiodeTarget) { _ = t.Framebuffer }, true)
+}
+`)
+	for _, env := range [][]string{{"GOOS=linux"}, {"GOOS=windows"}, {"GOOS=js", "GOARCH=wasm"}} {
+		cmd := exec.Command("go", "build", "-modfile="+modfile, "-o", os.DevNull, ".")
+		cmd.Dir = app
+		cmd.Env = append(os.Environ(), env...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Errorf("%v: %v\n%s", env, err, out)
+		}
+	}
+
 	// A second build reuses the copy.
-	m2, c2, err := Prepare(app, Android)
+	m2, c2, err := Prepare(app, All)
 	if err != nil {
 		t.Fatal(err)
 	}

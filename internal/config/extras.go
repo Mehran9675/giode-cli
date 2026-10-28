@@ -117,13 +117,18 @@ func (c *Config) IOSPlist() (string, error) {
 // MacOSPlist returns the Info.plist entries giode adds for macOS.
 func (c *Config) MacOSPlist() (string, error) {
 	raw := c.MacOS.Plist
-	if len(c.ContextActions) > 0 {
-		raw = make(map[string]any, len(c.MacOS.Plist)+1)
+	if len(c.ContextActions) > 0 || len(c.FileTypes) > 0 {
+		raw = make(map[string]any, len(c.MacOS.Plist)+3)
 		for k, v := range c.MacOS.Plist {
 			raw[k] = v
 		}
-		if _, ok := raw["NSServices"]; !ok {
+		if _, ok := raw["NSServices"]; !ok && len(c.ContextActions) > 0 {
 			raw["NSServices"] = c.macServices()
+		}
+		for k, v := range c.macFileTypes() {
+			if _, ok := raw[k]; !ok {
+				raw[k] = v
+			}
 		}
 	}
 	return infoPlist(c.MacOS.Usage, raw)

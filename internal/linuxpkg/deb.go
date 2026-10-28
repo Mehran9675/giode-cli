@@ -61,7 +61,7 @@ func Deb(a App, out string) error {
 	}
 	var control strings.Builder
 	fmt.Fprintf(&control, "Package: %s\nVersion: %s-%d\nArchitecture: %s\nMaintainer: %s\n", packageName(a.Command), a.Version, max(a.Build, 1), arch, a.maintainer())
-	fmt.Fprintf(&control, "Installed-Size: %d\nDepends: %s\nSection: utils\nPriority: optional\n", (size+1023)/1024, debDepends)
+	fmt.Fprintf(&control, "Installed-Size: %d\nDepends: %s\nSection: utils\nPriority: optional\n", (size+1023)/1024, strings.Join(append([]string{debDepends}, a.Depends...), ", "))
 	if a.Website != "" {
 		fmt.Fprintf(&control, "Homepage: %s\n", a.Website)
 	}

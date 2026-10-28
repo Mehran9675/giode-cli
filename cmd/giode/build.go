@@ -15,7 +15,6 @@ import (
 	_ "image/jpeg"
 
 	"github.com/mehran9675/giode-cli/internal/config"
-	"github.com/mehran9675/giode-cli/internal/giopatch"
 	"github.com/mehran9675/giode-cli/internal/gogio"
 	"github.com/mehran9675/giode-cli/internal/installer"
 	"github.com/mehran9675/giode-cli/internal/pwa"
@@ -232,20 +231,14 @@ func buildTarget(c *config.Config, target string, o buildOpts) (string, error) {
 		return "", err
 	}
 	defer os.Chdir(wd)
-	if (target == "android" || target == "aab") && (c.Android.GioPatches == nil || *c.Android.GioPatches) {
-		modfile, cleanup, err := giopatch.Prepare(c.Dir, giopatch.Android)
-		switch {
-		case err == nil:
-			defer cleanup()
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  building against patched Gio (%s)\n", modfile)
-			}
-			g.ModFile = modfile
-		case errors.Is(err, giopatch.ErrSkipped):
-			fmt.Fprintf(os.Stderr, "  note: Gio's Android frame pacing fix not applied (%v)\n", err)
-		default:
-			return "", fmt.Errorf("patching Gio: %w (set android.gio_patches = false to skip)", err)
-		}
+	gb, err := prepareGio(c, target)
+	if err != nil {
+		return "", err
+	}
+	defer gb.cleanup()
+	g.ModFile, g.Tags = gb.modfile, gb.tags
+	if target == "macos" {
+		g.MacBundle = macBundleLibs(c)
 	}
 	symbols := ""
 	if (target == "android" || target == "aab") && o.release {
@@ -274,6 +267,11 @@ func buildTarget(c *config.Config, target string, o buildOpts) (string, error) {
 		}, g.Output)
 		if err != nil {
 			return "", fmt.Errorf("making the PWA: %w", err)
+		}
+	}
+	if target == "windows" {
+		if _, err := windowsDLLs(c, g.Output); err != nil {
+			return "", err
 		}
 	}
 	if target == "windows" && o.release {
@@ -319,6 +317,12 @@ func buildWindowsInstaller(c *config.Config, o buildOpts) (string, error) {
 		Exe: exe, Icon: c.Path(c.App.Icon), License: c.Path(inst.License),
 		PerMachine: inst.PerMachine, DesktopShortcut: inst.DesktopShortcut,
 		Output: out, Verbose: verbose,
+	}
+	if opts.Files, err = windowsDLLs(c, exe); err != nil {
+		return "", err
+	}
+	for _, ft := range c.WindowsFileTypes() {
+		opts.FileTypes = append(opts.FileTypes, installer.FileType{ProgID: ft.ProgID, Name: ft.Name, Extensions: ft.Extensions, Icon: ft.Icon})
 	}
 	for _, v := range c.WindowsVerbs() {
 		opts.ContextMenu = append(opts.ContextMenu, installer.Verb{Key: v.Key, Label: v.Label, ID: v.ID, Arg: v.Arg})
@@ -469,6 +473,7 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 		if g.Arch == "" {
 			g.Arch = "amd64"
 		}
+		g.Env = c.WindowsCgoEnv()
 		platform, file = "windows", binaryName(c)+".exe"
 	case "web":
 		g.Target = "js"
@@ -531,16 +536,25 @@ func buildLinux(c *config.Config, o buildOpts) (string, error) {
 		bin, _ = filepath.Abs(o.output)
 		d = filepath.Dir(bin)
 	}
-	ldflags := strings.TrimSpace("-s -w -X gioui.org/app.ID=" + c.App.ID + " " + desktopLdflags(c, "linux"))
-	args := []string{"build", "-trimpath", "-ldflags", ldflags, "-o", bin}
-	if c.App.Tags != "" {
-		args = append(args, "-tags", c.App.Tags)
+	ldflags := strings.TrimSpace("-s -w -X gioui.org/app.ID=" + c.App.ID + " " + desktopLdflags(c, "linux") + " " + linuxRpathLdflag(c, filepath.Base(bin)))
+	gb, err := prepareGio(c, "linux")
+	if err != nil {
+		return "", err
 	}
+	defer gb.cleanup()
+	args := append([]string{"build", "-trimpath", "-ldflags", ldflags, "-o", bin}, gb.goArgs()...)
 	cmd := command(c, "go", append(args, pkgPath(c))...)
 	if o.arch != "" {
 		cmd.Env = append(os.Environ(), "GOARCH="+o.arch)
 	}
 	if err := run(cmd); err != nil {
+		return "", err
+	}
+	libs, err := nativeLibs(c, "linux", bin)
+	if err != nil {
+		return "", err
+	}
+	if _, err := copyLibs(libs, filepath.Join(d, "lib")); err != nil {
 		return "", err
 	}
 	if icon := c.Path(c.App.Icon); icon != "" {
@@ -554,11 +568,11 @@ func buildLinux(c *config.Config, o buildOpts) (string, error) {
 	}
 	desktop := fmt.Sprintf("[Desktop Entry]\nType=Application\nName=%s\nExec=%s %%U\nIcon=%s\nCategories=%s\nTerminal=false\n",
 		c.App.Name, filepath.Base(bin), c.App.ID, cats)
-	if len(c.App.Schemes) > 0 {
-		var types []string
-		for _, s := range c.App.Schemes {
-			types = append(types, "x-scheme-handler/"+s)
-		}
+	types, _ := c.LinuxMIMETypes(filepath.Base(bin))
+	for _, s := range c.App.Schemes {
+		types = append(types, "x-scheme-handler/"+s)
+	}
+	if len(types) > 0 {
 		desktop += "MimeType=" + strings.Join(types, ";") + ";\n"
 	}
 	if err := os.WriteFile(filepath.Join(d, c.App.ID+".desktop"), []byte(desktop), 0o644); err != nil {

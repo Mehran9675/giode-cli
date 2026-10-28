@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/mehran9675/giode-cli/internal/config"
+
 	"fmt"
 	"os"
 	"os/exec"
@@ -37,6 +39,9 @@ func cmdDoctor(args []string) error {
 	checks = append(checks, checkGo())
 	checks = append(checks, checkAndroid()...)
 	checks = append(checks, checkWindowsPackaging()...)
+	if c, err := loadProject("."); err == nil {
+		checks = append(checks, checkProject(c)...)
+	}
 	switch runtime.GOOS {
 	case "darwin":
 		checks = append(checks, checkXcode()...)
@@ -236,4 +241,55 @@ func checkWindowsPackaging() []check {
 		}
 	}
 	return []check{nsis, signer}
+}
+
+// checkProject checks the tools the project in the current directory
+// asks for in giode.toml.
+func checkProject(c *config.Config) []check {
+	var checks []check
+	if w := c.Windows; w.CC != "" {
+		area := "Windows cgo (giode.toml windows.cc)"
+		for _, tool := range []struct{ name, fix string }{
+			{w.CC, "Install a MinGW-w64 C compiler: apt install gcc-mingw-w64-x86-64, brew install mingw-w64, or MSYS2's mingw-w64-x86_64-gcc on Windows"},
+			{w.CXX, "Install the MinGW-w64 C++ compiler (g++-mingw-w64-x86-64)"},
+			{firstNonEmpty(w.PkgConfig, "pkg-config"), "Install pkg-config (apt install pkg-config, brew install pkg-config, MSYS2's mingw-w64-x86_64-pkgconf)"},
+		} {
+			if tool.name == "" {
+				continue
+			}
+			ch := check{area: area, name: tool.name}
+			if p, err := exec.LookPath(tool.name); err == nil {
+				ch.ok, ch.detail = true, p
+			} else {
+				ch.fix = tool.fix
+			}
+			checks = append(checks, ch)
+		}
+		if w.PkgConfigPath != "" {
+			ch := check{area: area, name: "pkg_config_path"}
+			missing := []string{}
+			for _, d := range filepath.SplitList(w.PkgConfigPath) {
+				if _, err := os.Stat(c.Path(d)); err != nil {
+					missing = append(missing, d)
+				}
+			}
+			ch.ok = len(missing) == 0
+			ch.detail = w.PkgConfigPath
+			if !ch.ok {
+				ch.fix = "Not found: " + strings.Join(missing, ", ") + " - the directory with the Windows libraries' .pc files"
+			}
+			checks = append(checks, ch)
+		}
+	}
+	checks = append(checks, checkNativeTools(c)...)
+	return checks
+}
+
+func firstNonEmpty(s ...string) string {
+	for _, v := range s {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

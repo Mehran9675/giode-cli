@@ -19,7 +19,7 @@ func linuxApp(c *config.Config, bin, arch string) linuxpkg.App {
 	if arch == "" {
 		arch = runtime.GOARCH
 	}
-	return linuxpkg.App{
+	a := linuxpkg.App{
 		Name: c.App.Name, ID: c.App.ID, Version: c.App.Version, Build: c.App.Build,
 		Summary: c.App.Description, Description: c.Linux.Description,
 		Publisher: c.App.Publisher, Maintainer: c.Linux.Maintainer,
@@ -27,6 +27,8 @@ func linuxApp(c *config.Config, bin, arch string) linuxpkg.App {
 		Binary: bin, Command: filepath.Base(bin), Icon: c.Path(c.App.Icon), Arch: arch,
 		FlatpakPermissions: c.Linux.FlatpakPermissions, Schemes: c.App.Schemes,
 	}
+	a.MIMETypes, a.MIMEXML = c.LinuxMIMETypes(a.Command)
+	return a
 }
 
 // buildLinuxPackage builds the Linux executable and packages it as a
@@ -39,6 +41,26 @@ func buildLinuxPackage(c *config.Config, kind string, o buildOpts) (string, erro
 		return "", err
 	}
 	a := linuxApp(c, bin, o.arch)
+	libs, err := nativeLibs(c, "linux", bin)
+	if err != nil {
+		return "", err
+	}
+	if c.Native.Linux.System && (kind == "deb" || kind == "rpm") {
+		// The system's packages provide them.
+		a.Depends = c.Native.Linux.DebDepends
+		a.Requires = append([]string{}, c.Native.Linux.RPMRequires...)
+		suffix := ""
+		if strings.HasSuffix(linuxpkg.RPMArch(a.Arch), "64") || linuxpkg.RPMArch(a.Arch) == "ppc64le" {
+			suffix = "(64bit)"
+		}
+		for _, l := range libs {
+			a.Requires = append(a.Requires, l.Name+"()"+suffix)
+		}
+	} else {
+		for _, l := range libs {
+			a.Libs = append(a.Libs, l.Path)
+		}
+	}
 	dir := filepath.Dir(bin)
 	name := strings.ToLower(binaryName(c))
 	var out string
@@ -126,10 +148,18 @@ func buildMSIX(c *config.Config, o buildOpts) (string, error) {
 	}
 	var protocols []string
 	protocols = append(protocols, c.App.Schemes...)
+	dlls, err := windowsDLLs(c, exe)
+	if err != nil {
+		return "", err
+	}
+	var msixTypes []msix.FileType
+	for _, ft := range c.WindowsFileTypes() {
+		msixTypes = append(msixTypes, msix.FileType{Name: strings.TrimPrefix(ft.Extensions[0], "."), DisplayName: ft.Name, Extensions: ft.Extensions})
+	}
 	if err := msix.Write(msix.App{
 		Name: c.App.Name, IdentityName: name, Publisher: m.Publisher, PublisherDisplayName: display,
 		Description: c.App.Description, Version: c.App.Version, Exe: exe, Icon: c.Path(c.App.Icon),
-		Arch: arch, Protocols: protocols,
+		Arch: arch, Protocols: protocols, Files: dlls, FileTypes: msixTypes,
 	}, out); err != nil {
 		return "", err
 	}

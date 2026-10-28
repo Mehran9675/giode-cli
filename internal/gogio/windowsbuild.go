@@ -267,6 +267,7 @@ func (b *windowsBuilder) buildProgram(buildInfo *buildInfo, name string, arch st
 		"GOOS=windows",
 		"GOARCH="+arch,
 	)
+	cmd.Env = append(cmd.Env, buildEnv...)
 	_, err := runCmd(cmd)
 	return err
 }

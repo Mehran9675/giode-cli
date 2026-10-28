@@ -69,7 +69,13 @@ func cmdRun(args []string) error {
 	o := buildOpts{release: *release, args: appArgs}
 	switch target {
 	case "desktop":
-		return run(command(c, "go", append([]string{"run", "-tags", c.App.Tags, pkgPath(c)}, appArgs...)...))
+		gb, err := prepareGio(c, "desktop")
+		if err != nil {
+			return err
+		}
+		defer gb.cleanup()
+		args := append(append([]string{"run"}, gb.goArgs()...), pkgPath(c))
+		return run(command(c, "go", append(args, appArgs...)...))
 	case "linux":
 		if runtime.GOOS != "linux" {
 			return errors.New("the Linux app runs on Linux; use giode run here, or run it in a Linux VM")
