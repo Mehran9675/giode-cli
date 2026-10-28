@@ -60,6 +60,8 @@ target needs.
 | `giode cert` | Creates a self-signed Windows code signing certificate for testing and points `giode.toml` at it. |
 | `giode sign <file>...` | Signs Windows executables and installers with the configured certificate. |
 | `giode links` | Writes `.well-known/assetlinks.json` and `apple-app-site-association` for each host in `app.links`, to upload to your site (fingerprints from `android.keystore` and `android.fingerprints`, team from `ios.team_id`). |
+| `giode update-key` | Creates the Ed25519 key pair signing update feeds: the private key in `update.key` (added to `.gitignore`), the public key in `[update]`. |
+| `giode release [targets]` | Builds desktop targets and writes `dist/update/`: the downloads, `feed.json` and its signature, for apps using the giode `update` package. |
 | `giode upgrade [version]` | Updates the project's giode dependency and tidies `go.mod`. |
 | `giode manifest [android\|ios\|macos]` | Prints what `giode.toml` adds to the manifest and Info.plist. |
 | `giode clean` | Removes `dist`. |
@@ -180,6 +182,12 @@ pwa = true                    # installable, works offline (default)
 short_name = "Agent"          # under the home screen icon
 theme_color = "#111827"
 background_color = "#111827"
+
+# Self-updates for desktop builds (the giode update package); giode update-key
+# writes public_key, giode release the signed feed to upload to feed_url.
+[update]
+feed_url = "https://example.com/updates/feed.json"
+public_key = "…"
 
 # The privacy manifest (PrivacyInfo.xcprivacy) App Store apps need. giode always
 # declares the system boot time and file timestamp APIs Go itself uses.

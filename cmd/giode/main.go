@@ -44,6 +44,8 @@ func init() {
 		{"cert", "create a self-signed Windows code signing certificate for testing", certUsage, cmdCert},
 		{"sign", "sign Windows executables and installers", signUsage, cmdSign},
 		{"links", "write the files a website serves for the app's universal links and App Links", linksUsage, cmdLinks},
+		{"update-key", "create the key pair that signs update feeds", updateKeyUsage, cmdUpdateKey},
+		{"release", "build desktop targets and write a signed update feed", releaseUsage, cmdRelease},
 		{"upgrade", "update the project to the latest giode", upgradeUsage, cmdUpgrade},
 		{"manifest", "print the Android manifest and Info.plist additions from giode.toml", manifestUsage, cmdManifest},
 		{"clean", "remove build output", cleanUsage, cmdClean},

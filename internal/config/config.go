@@ -28,6 +28,9 @@ type Config struct {
 	Linux   Linux   `toml:"linux"`
 	Web     Web     `toml:"web"`
 
+	// Update configures self-updates of desktop builds.
+	Update Update `toml:"update"`
+
 	// Privacy is the privacy manifest for iOS and macOS.
 	Privacy Privacy `toml:"privacy"`
 
@@ -225,6 +228,31 @@ type WindowsInstaller struct {
 	// DesktopShortcut adds a desktop shortcut as well as the Start menu
 	// one.
 	DesktopShortcut bool `toml:"desktop_shortcut"`
+}
+
+// Update configures the giode update package for desktop builds.
+type Update struct {
+	// FeedURL is where the app looks for updates: the feed.json giode
+	// release writes, uploaded.
+	FeedURL string `toml:"feed_url"`
+	// PublicKey is the base64 Ed25519 key the app checks the feed with
+	// (giode update-key writes it).
+	PublicKey string `toml:"public_key"`
+	// PrivateKey is the file with the private key giode release signs
+	// with, update.key by default; $GIODE_UPDATE_KEY overrides it with
+	// the key itself (for CI).
+	PrivateKey string `toml:"private_key"`
+}
+
+// UpdateLdflags returns the linker flags configuring the update
+// package, or "" without [update].
+func (c *Config) UpdateLdflags() string {
+	if c.Update.FeedURL == "" || c.Update.PublicKey == "" {
+		return ""
+	}
+	const pkg = "github.com/mehran9675/giode/update."
+	return "-X " + pkg + "defaultFeedURL=" + c.Update.FeedURL + " -X " + pkg + "defaultPublicKey=" + c.Update.PublicKey +
+		" -X " + pkg + "defaultVersion=" + c.App.Version
 }
 
 // Linux configures Linux builds.

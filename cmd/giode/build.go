@@ -318,7 +318,7 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 		Name:          binaryName(c),
 		Version:       c.GogioVersion(),
 		Tags:          c.App.Tags,
-		Ldflags:       strings.TrimSpace(c.App.Ldflags + " " + c.ContextActionsLdflag()),
+		Ldflags:       desktopLdflags(c, target),
 		Schemes:       c.App.Schemes,
 		Arch:          o.arch,
 		PrintCommands: verbose,
@@ -499,7 +499,7 @@ func buildLinux(c *config.Config, o buildOpts) (string, error) {
 		bin, _ = filepath.Abs(o.output)
 		d = filepath.Dir(bin)
 	}
-	ldflags := strings.TrimSpace("-s -w -X gioui.org/app.ID=" + c.App.ID + " " + c.App.Ldflags + " " + c.ContextActionsLdflag())
+	ldflags := strings.TrimSpace("-s -w -X gioui.org/app.ID=" + c.App.ID + " " + desktopLdflags(c, "linux"))
 	args := []string{"build", "-trimpath", "-ldflags", ldflags, "-o", bin}
 	if c.App.Tags != "" {
 		args = append(args, "-tags", c.App.Tags)
@@ -556,4 +556,15 @@ func writeLinuxIcon(src, dst string) error {
 		err = cerr
 	}
 	return err
+}
+
+// desktopLdflags returns the linker flags for a target: app.ldflags,
+// plus on desktops the context actions and update settings.
+func desktopLdflags(c *config.Config, target string) string {
+	flags := c.App.Ldflags
+	switch target {
+	case "windows", "macos", "linux":
+		flags += " " + c.ContextActionsLdflag() + " " + c.UpdateLdflags()
+	}
+	return strings.Join(strings.Fields(flags), " ")
 }
