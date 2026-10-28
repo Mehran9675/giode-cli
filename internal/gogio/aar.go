@@ -39,6 +39,30 @@ var (
 // gets them.
 const depsFile = "android_dependencies.txt"
 
+// pkgManifestFile, in a Go package's directory, is a manifest whose
+// permissions and <application> components are merged into the app's,
+// as a library's are: the services the package's Java code needs.
+const pkgManifestFile = "android_manifest.xml"
+
+// pkgManifests are the manifests of the packages the app imports.
+var pkgManifests []*xmlNode
+
+// readPkgManifest reads a package directory's pkgManifestFile.
+func readPkgManifest(dir string) (*xmlNode, error) {
+	b, err := os.ReadFile(filepath.Join(dir, pkgManifestFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	n, err := parseXML(b)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Join(dir, pkgManifestFile), err)
+	}
+	return n, nil
+}
+
 // readDeps reads the coordinates in a package directory's depsFile.
 func readDeps(dir string) ([]string, error) {
 	b, err := os.ReadFile(filepath.Join(dir, depsFile))

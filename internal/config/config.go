@@ -156,6 +156,11 @@ type IOS struct {
 	// TeamID is the Apple developer team ID, for universal links'
 	// apple-app-site-association file.
 	TeamID string `toml:"team_id"`
+	// Push enables push notifications (giode/push): "development" or
+	// "production", the APNs environment of the aps-environment
+	// entitlement, which the provisioning profile must allow. It also
+	// lets silent pushes wake the app (UIBackgroundModes).
+	Push string `toml:"push"`
 }
 
 // MacOS configures macOS app bundles.
@@ -173,6 +178,9 @@ type MacOS struct {
 	NotaryID      string `toml:"notary_id"`
 	NotaryTeamID  string `toml:"notary_team_id"`
 	NotaryPassEnv string `toml:"notary_pass_env"`
+	// Push enables push notifications, as ios.push. It needs Profile:
+	// macOS refuses the entitlement without a provisioning profile.
+	Push string `toml:"push"`
 }
 
 // Windows configures Windows builds.
@@ -432,6 +440,16 @@ func (c *Config) Validate() error {
 	for _, p := range []map[string]any{c.IOS.Plist, c.MacOS.Plist} {
 		if _, err := plistXML(p); err != nil {
 			errs = append(errs, err)
+		}
+	}
+	for k, v := range map[string]string{"ios.push": c.IOS.Push, "macos.push": c.MacOS.Push} {
+		if v != "" && v != "development" && v != "production" {
+			errs = append(errs, fmt.Errorf("%s is %q; use development or production", k, v))
+		}
+	}
+	for _, d := range c.Android.Dependencies {
+		if p := strings.Split(d, ":"); len(p) != 3 || p[0] == "" || p[1] == "" || p[2] == "" {
+			errs = append(errs, fmt.Errorf("android.dependencies entry %q isn't group:artifact:version", d))
 		}
 	}
 	return errors.Join(errs...)

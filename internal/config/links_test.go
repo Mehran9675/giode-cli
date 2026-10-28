@@ -74,3 +74,21 @@ func TestLoad_CIOverrides(t *testing.T) {
 		t.Error("a non-numeric GIODE_BUILD was accepted")
 	}
 }
+
+func TestPushEntitlements(t *testing.T) {
+	c := &Config{IOS: IOS{Push: "production"}, MacOS: MacOS{Push: "development"}}
+	if e := c.IOSEntitlements(); e["aps-environment"] != "production" {
+		t.Errorf("iOS %v", e)
+	}
+	if e := c.MacOSEntitlements(); e["com.apple.developer.aps-environment"] != "development" || e["aps-environment"] != nil {
+		t.Errorf("macOS %v", e)
+	}
+	plist, err := c.IOSPlist()
+	if err != nil || !strings.Contains(plist, "<key>UIBackgroundModes</key>") || !strings.Contains(plist, "<string>remote-notification</string>") {
+		t.Errorf("plist %v\n%s", err, plist)
+	}
+	c.IOS.Push = "prod"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "ios.push") {
+		t.Errorf("validate: %v", err)
+	}
+}

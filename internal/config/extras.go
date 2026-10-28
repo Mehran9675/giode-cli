@@ -95,7 +95,23 @@ var usageKeys = map[string]string{
 // IOSPlist returns the Info.plist entries giode adds for iOS, as plist
 // XML key/value pairs.
 func (c *Config) IOSPlist() (string, error) {
-	return infoPlist(c.IOS.Usage, c.IOS.Plist)
+	raw := c.IOS.Plist
+	if c.IOS.Push != "" {
+		raw = make(map[string]any, len(c.IOS.Plist)+1)
+		for k, v := range c.IOS.Plist {
+			raw[k] = v
+		}
+		modes := []string{"remote-notification"}
+		if old, ok := raw["UIBackgroundModes"].([]any); ok {
+			for _, m := range old {
+				if s, ok := m.(string); ok && s != "remote-notification" {
+					modes = append(modes, s)
+				}
+			}
+		}
+		raw["UIBackgroundModes"] = modes
+	}
+	return infoPlist(c.IOS.Usage, raw)
 }
 
 // MacOSPlist returns the Info.plist entries giode adds for macOS.

@@ -70,8 +70,28 @@ func (c *Config) AndroidActivityXML() string {
 	return b.String()
 }
 
+// IOSEntitlements returns the entitlements giode adds to iOS signing:
+// associated domains for app.links, aps-environment for ios.push.
+func (c *Config) IOSEntitlements() map[string]any {
+	ents := c.AppleEntitlements()
+	if c.IOS.Push != "" {
+		ents["aps-environment"] = c.IOS.Push
+	}
+	return ents
+}
+
+// MacOSEntitlements returns the entitlements giode adds to macOS
+// signing with a provisioning profile.
+func (c *Config) MacOSEntitlements() map[string]any {
+	ents := c.AppleEntitlements()
+	if c.MacOS.Push != "" {
+		ents["com.apple.developer.aps-environment"] = c.MacOS.Push
+	}
+	return ents
+}
+
 // AppleEntitlements returns the entitlements giode adds to iOS and
-// macOS signing: associated domains for app.links.
+// macOS signing alike: associated domains for app.links.
 func (c *Config) AppleEntitlements() map[string]any {
 	ents := map[string]any{}
 	if hosts := c.LinkHosts(); len(hosts) > 0 {

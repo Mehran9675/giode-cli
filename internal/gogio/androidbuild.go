@@ -124,6 +124,8 @@ func buildAndroid(tmpDir string, bi *buildInfo) error {
 	}
 	var extraJars []string
 	deps := append([]string{}, androidDeps...)
+	pkgManifests = nil
+	defer func() { pkgManifests = nil }()
 	visitedPkgs := make(map[string]bool)
 	var visitPkg func(*packages.Package) error
 	visitPkg = func(p *packages.Package) error {
@@ -141,6 +143,13 @@ func buildAndroid(tmpDir string, bi *buildInfo) error {
 			return err
 		}
 		deps = append(deps, d...)
+		m, err := readPkgManifest(dir)
+		if err != nil {
+			return err
+		}
+		if m != nil {
+			pkgManifests = append(pkgManifests, m)
+		}
 		switch {
 		case p.PkgPath == "net":
 			perms = append(perms, "network")
@@ -160,6 +169,11 @@ func buildAndroid(tmpDir string, bi *buildInfo) error {
 		return err
 	}
 
+	for _, d := range deps {
+		if strings.HasPrefix(d, "com.google.firebase:") && !strings.Contains(extras.AndroidValues, `"google_app_id"`) {
+			return fmt.Errorf("%s needs the app's Firebase configuration: download google-services.json from the Firebase console and set android.google_services in giode.toml", d)
+		}
+	}
 	libs, err := resolveLibs(deps)
 	if err != nil {
 		return err
@@ -374,6 +388,9 @@ func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, li
 	libs, libJars, err := unpackLibs(libPaths, filepath.Join(tmpDir, "libs"), aapt2)
 	if err != nil {
 		return err
+	}
+	for _, m := range pkgManifests {
+		libs = append(libs, aarLib{manifest: m})
 	}
 	merged := mergeManifests(libs, bi.appID, extras.AndroidApplication)
 	classes := filepath.Join(tmpDir, "classes")

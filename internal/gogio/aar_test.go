@@ -263,3 +263,26 @@ func runCmdCheck(name string, args ...string) error {
 	_, err := runCmd(exec.Command(name, args...))
 	return err
 }
+
+func TestPkgManifest(t *testing.T) {
+	dir := t.TempDir()
+	if n, err := readPkgManifest(dir); n != nil || err != nil {
+		t.Fatalf("none: %v %v", n, err)
+	}
+	os.WriteFile(filepath.Join(dir, pkgManifestFile), []byte(`<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+	<uses-permission android:name="android.permission.WAKE_LOCK"/>
+	<application>
+		<service android:name="org.giode.push.PushService" android:exported="false">
+			<intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT"/></intent-filter>
+		</service>
+	</application>
+</manifest>`), 0o644)
+	n, err := readPkgManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := mergeManifests([]aarLib{{manifest: n}}, "com.example.app", "")
+	if len(m.permissions) != 1 || !strings.Contains(m.application, `<action android:name="com.google.firebase.MESSAGING_EVENT"/>`) {
+		t.Errorf("%v\n%s", m.permissions, m.application)
+	}
+}

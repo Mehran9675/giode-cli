@@ -125,10 +125,15 @@ manifest = '<uses-feature android:name="android.hardware.camera" android:require
 application = '<meta-data android:name="example" android:value="1"/>'
 keystore = "release.keystore" # used by giode build -release
 keystore_pass_env = "GIODE_KEYSTORE_PASS"
+google_services = "google-services.json"   # from the Firebase console, for giode/push
+dependencies = ["com.squareup.okhttp3:okhttp:4.12.0"]  # Maven libraries built in
+libraries = ["libs/vendor.aar"]   # local .aar and .jar files built in
+# repositories = ["https://dl.google.com/dl/android/maven2", "https://repo1.maven.org/maven2"]
 
 [ios]
 min_os = 15
 profile = "Agent.mobileprovision"   # for device builds
+push = "production"           # giode/push: aps-environment (development or production)
 
 [ios.usage]                   # shown when iOS asks for a permission
 camera = "To attach photos you take."
@@ -145,6 +150,7 @@ identity = "Developer ID Application: Example Ltd (ABCDE12345)"  # signs -releas
 notary_id = "you@example.com"
 notary_team_id = "ABCDE12345"
 notary_pass_env = "GIODE_NOTARY_PASS"
+# push = "production"         # giode/push; needs profile, a .provisionprofile
 
 [macos.usage]
 microphone = "To dictate messages."
@@ -284,6 +290,26 @@ commands run in your module (`GOFLAGS` is left alone). The patch is skipped, wit
 when go isn't in module mode, or your module already replaces `gioui.org`, vendors its
 dependencies or is in a Go workspace, or when your Gio version doesn't have the code the patch expects. Set
 `gio_patches = false` under `[android]` to build against plain Gio.
+
+## Android libraries
+
+Android builds take libraries from Maven repositories, as Gradle would:
+`android.dependencies` lists `group:artifact:version` coordinates, which
+giode resolves with their dependencies from Google's Maven repository and
+Maven Central (cached in the user cache directory), and
+`android.libraries` adds local `.aar` and `.jar` files. Their classes are
+dexed with the app's (multidex when needed), their resources linked with
+R classes for their packages, their manifests merged into the app's, and
+their native libraries (for the app's ABIs) and assets packaged.
+
+A Go package can ask for libraries itself: an `android_dependencies.txt`
+next to its Go files lists coordinates, and an `android_manifest.xml`
+adds permissions and `<application>` components, for every app importing
+it. That's how giode's `push` (Firebase Cloud Messaging), `store` (Play
+Billing) and `review` (Play In-App Review) packages bring what they need;
+`push` also needs `android.google_services`, the `google-services.json`
+file from the Firebase console, which giode turns into the resources
+Firebase reads, as Google's Gradle plugin does.
 
 ## License
 
