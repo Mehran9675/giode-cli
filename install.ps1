@@ -9,11 +9,18 @@ $ErrorActionPreference = 'Stop'
 $repo = 'Mehran9675/giode-cli'
 $arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'arm64' } else { 'amd64' }
 $name = "giode_windows_$arch"
-$url = if ($env:GIODE_VERSION) {
-  "https://github.com/$repo/releases/download/$($env:GIODE_VERSION)/$name.zip"
-} else {
-  "https://github.com/$repo/releases/latest/download/$name.zip"
+$version = $env:GIODE_VERSION
+if (-not $version) {
+  # The newest release with archives, pre-releases included: GitHub's
+  # releases/latest leaves those out, and giode's are alphas for now.
+  $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases?per_page=20" -UseBasicParsing
+  $release = $releases | Where-Object { -not $_.draft -and ($_.assets | Where-Object { $_.name -eq "$name.zip" }) } | Select-Object -First 1
+  if (-not $release) {
+    throw "No giode release for Windows $arch is published yet; install with: go install github.com/mehran9675/giode-cli/cmd/giode@latest"
+  }
+  $version = $release.tag_name
 }
+$url = "https://github.com/$repo/releases/download/$version/$name.zip"
 $dir = if ($env:GIODE_INSTALL_DIR) { $env:GIODE_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\giode' }
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 

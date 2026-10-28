@@ -229,6 +229,7 @@ func exeIOS(tmpDir, target, app string, bi *buildInfo) error {
 			"CGO_CFLAGS="+cflagsLine,
 			"CGO_CXXFLAGS="+cflagsLine,
 			"CGO_LDFLAGS=-lresolv "+cflagsLine,
+			iosDeploymentTarget(bi.minsdk),
 		)
 		builds.Go(func() error {
 			_, err := runCmd(compile)
@@ -554,6 +555,7 @@ func archiveIOS(tmpDir, target, frameworkRoot string, bi *buildInfo) error {
 			"CC="+clang,
 			"CGO_CFLAGS="+cflagsLine,
 			"CGO_LDFLAGS="+cflagsLine,
+			iosDeploymentTarget(bi.minsdk),
 		)
 		builds.Go(func() error {
 			_, err := runCmd(cmd)
@@ -699,4 +701,17 @@ func applyEntitlements(file string, ents map[string]any) error {
 		}
 	}
 	return nil
+}
+
+// iosDeploymentTarget is the IPHONEOS_DEPLOYMENT_TARGET for an iOS
+// build's commands: Go's cgo build of the iOS runtime needs one, or
+// clang gets -miphoneos-version-min=0.0. It's set for those commands
+// only - clang reads it, so set in giode's own environment it would
+// make a later macOS build in the same run target the iPhone. One
+// already in the environment wins.
+func iosDeploymentTarget(minsdk int) string {
+	if v := os.Getenv("IPHONEOS_DEPLOYMENT_TARGET"); v != "" {
+		return "IPHONEOS_DEPLOYMENT_TARGET=" + v
+	}
+	return fmt.Sprintf("IPHONEOS_DEPLOYMENT_TARGET=%d.0", minsdk)
 }
