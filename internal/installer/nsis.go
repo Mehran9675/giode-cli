@@ -36,10 +36,21 @@ type Options struct {
 	PerMachine bool
 	// DesktopShortcut adds a desktop shortcut.
 	DesktopShortcut bool
+	// ContextMenu are Explorer context menu entries to register, and
+	// remove on uninstall.
+	ContextMenu []Verb
 	// Output is the setup program to write.
 	Output string
 	// Verbose prints the makensis command and its output.
 	Verbose bool
+}
+
+// Verb is an Explorer context menu entry: a key under
+// Software\Classes (*\shell\name, Directory\shell\name, ...), its
+// label, and the giode context action and path argument (%1, %V) its
+// command passes to the app.
+type Verb struct {
+	Key, Label, ID, Arg string
 }
 
 // Build writes a setup program with makensis: a wizard (welcome,
@@ -284,6 +295,11 @@ Section "Install"
 	WriteRegDWORD ${REGROOT} "${UNINST_KEY}" "NoModify" 1
 	WriteRegDWORD ${REGROOT} "${UNINST_KEY}" "NoRepair" 1
 	WriteRegDWORD ${REGROOT} "${UNINST_KEY}" "EstimatedSize" {{.SizeKB}}
+{{- range .ContextMenu}}
+	WriteRegStr ${REGROOT} {{q (printf "Software\\Classes\\%s" .Key)}} "MUIVerb" {{q .Label}}
+	WriteRegStr ${REGROOT} {{q (printf "Software\\Classes\\%s" .Key)}} "Icon" "$INSTDIR\${EXE}"
+	WriteRegStr ${REGROOT} {{q (printf "Software\\Classes\\%s\\command" .Key)}} "" '"$INSTDIR\${EXE}" --giode-action={{.ID}} "{{.Arg}}"'
+{{- end}}
 SectionEnd
 
 Section "Uninstall"
@@ -293,5 +309,8 @@ Section "Uninstall"
 	Delete "$SMPROGRAMS\${APPNAME}.lnk"
 	Delete "$DESKTOP\${APPNAME}.lnk"
 	DeleteRegKey ${REGROOT} "${UNINST_KEY}"
+{{- range .ContextMenu}}
+	DeleteRegKey ${REGROOT} {{q (printf "Software\\Classes\\%s" .Key)}}
+{{- end}}
 SectionEnd
 `))

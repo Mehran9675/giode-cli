@@ -28,6 +28,10 @@ type Config struct {
 	Linux   Linux   `toml:"linux"`
 	Web     Web     `toml:"web"`
 
+	// ContextActions add entries to the file manager's right-click menu
+	// that open the app with the chosen paths.
+	ContextActions []ContextAction `toml:"context_actions"`
+
 	// Dir is the directory holding giode.toml; paths in it are
 	// relative to Dir.
 	Dir string `toml:"-"`
@@ -287,6 +291,7 @@ func (c *Config) Validate() error {
 	if c.App.Build < 1 {
 		errs = append(errs, fmt.Errorf("app.build must be at least 1"))
 	}
+	errs = append(errs, c.validateContextActions()...)
 	if cmd := c.Windows.Signing.Command; len(cmd) > 0 && !strings.Contains(strings.Join(cmd, " "), "{file}") {
 		errs = append(errs, errors.New("windows.signing.command must contain {file}, where the file to sign goes"))
 	}

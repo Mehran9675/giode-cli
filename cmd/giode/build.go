@@ -268,6 +268,9 @@ func buildWindowsInstaller(c *config.Config, o buildOpts) (string, error) {
 		PerMachine: inst.PerMachine, DesktopShortcut: inst.DesktopShortcut,
 		Output: out, Verbose: verbose,
 	}
+	for _, v := range c.WindowsVerbs() {
+		opts.ContextMenu = append(opts.ContextMenu, installer.Verb{Key: v.Key, Label: v.Label, ID: v.ID, Arg: v.Arg})
+	}
 	if err := installer.Build(opts); err != nil {
 		return "", err
 	}
@@ -286,7 +289,7 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 		Name:          binaryName(c),
 		Version:       c.GogioVersion(),
 		Tags:          c.App.Tags,
-		Ldflags:       c.App.Ldflags,
+		Ldflags:       strings.TrimSpace(c.App.Ldflags + " " + c.ContextActionsLdflag()),
 		Schemes:       c.App.Schemes,
 		Arch:          o.arch,
 		PrintCommands: verbose,
@@ -459,7 +462,7 @@ func buildLinux(c *config.Config, o buildOpts) (string, error) {
 		bin, _ = filepath.Abs(o.output)
 		d = filepath.Dir(bin)
 	}
-	ldflags := strings.TrimSpace("-s -w -X gioui.org/app.ID=" + c.App.ID + " " + c.App.Ldflags)
+	ldflags := strings.TrimSpace("-s -w -X gioui.org/app.ID=" + c.App.ID + " " + c.App.Ldflags + " " + c.ContextActionsLdflag())
 	args := []string{"build", "-trimpath", "-ldflags", ldflags, "-o", bin}
 	if c.App.Tags != "" {
 		args = append(args, "-tags", c.App.Tags)

@@ -157,6 +157,19 @@ categories = ["Utility", "Office"]
 
 [web]
 port = 8080
+
+# Entries in the file manager's right-click menu that open the app with the
+# chosen paths (giode.Config.OnContextAction receives them).
+[[context_actions]]
+id = "ask"
+label = "Ask Pocket Agent"
+extensions = [".md", ".txt"]  # or files = true for every file
+
+[[context_actions]]
+id = "here"
+label = "Open Pocket Agent here"
+folders = true
+background = true             # the empty space of an open folder
 ```
 
 **Android permissions** take gogio's short names (`network`, `networkstate`,
@@ -170,6 +183,12 @@ port = 8080
 `bluetooth`, `faceid`, `motion`, `health`, `health_update`, `tracking`,
 `local_network`. iOS ends an app that uses the camera, microphone or speech recognition
 without one; giode's `PickPhoto` and `Dictate` check for them and return an error instead.
+
+**Context actions** go into the build (the giode library reads them, and
+`App.InstallContextActions` registers them for the current user), the Windows installer
+(Explorer's context menu, removed on uninstall; on Windows 11 under "Show more options"),
+and the macOS app's `NSServices` (Finder's Quick Actions, once the app is in
+`/Applications` and has run once).
 
 ## Signing
 

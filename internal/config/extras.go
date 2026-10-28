@@ -100,7 +100,17 @@ func (c *Config) IOSPlist() (string, error) {
 
 // MacOSPlist returns the Info.plist entries giode adds for macOS.
 func (c *Config) MacOSPlist() (string, error) {
-	return infoPlist(c.MacOS.Usage, c.MacOS.Plist)
+	raw := c.MacOS.Plist
+	if len(c.ContextActions) > 0 {
+		raw = make(map[string]any, len(c.MacOS.Plist)+1)
+		for k, v := range c.MacOS.Plist {
+			raw[k] = v
+		}
+		if _, ok := raw["NSServices"]; !ok {
+			raw["NSServices"] = c.macServices()
+		}
+	}
+	return infoPlist(c.MacOS.Usage, raw)
 }
 
 func infoPlist(usage map[string]string, raw map[string]any) (string, error) {
@@ -158,6 +168,23 @@ func plistValue(v any) (string, error) {
 			b.WriteString(s)
 		}
 		b.WriteString("</array>")
+		return b.String(), nil
+	case map[string]any:
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		var b strings.Builder
+		b.WriteString("<dict>")
+		for _, k := range keys {
+			s, err := plistValue(v[k])
+			if err != nil {
+				return "", err
+			}
+			b.WriteString("<key>" + html.EscapeString(k) + "</key>" + s)
+		}
+		b.WriteString("</dict>")
 		return b.String(), nil
 	case []string:
 		a := make([]any, len(v))
