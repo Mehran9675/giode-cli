@@ -18,6 +18,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -46,6 +47,17 @@ type App struct {
 	Arch string
 	// Protocols are URL schemes the app handles.
 	Protocols []string
+	// Files are packaged next to the program: the DLLs it loads.
+	Files []string
+	// FileTypes are file types the app opens.
+	FileTypes []FileType
+}
+
+// FileType is a file type association: a name (lower case letters,
+// digits, -, _ and .), a description and extensions with the dot.
+type FileType struct {
+	Name, DisplayName string
+	Extensions        []string
 }
 
 var archNames = map[string]string{"amd64": "x64", "arm64": "arm64", "386": "x86"}
@@ -68,6 +80,13 @@ func Write(a App, out string) error {
 	}
 	exeName := path.Base(strings.ReplaceAll(a.Exe, `\`, "/"))
 	files := []file{{name: exeName, body: exe}}
+	for _, f := range a.Files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return err
+		}
+		files = append(files, file{name: filepath.Base(f), body: b})
+	}
 	logos := map[string]int{"Square44x44Logo.png": 44, "Square150x150Logo.png": 150, "Wide310x150Logo.png": 0, "StoreLogo.png": 50}
 	if a.Icon == "" {
 		return fmt.Errorf("an MSIX package needs an icon: set app.icon in giode.toml")
@@ -204,10 +223,17 @@ func Manifest(a App, arch, exe string) (string, error) {
 	}
 	e := html.EscapeString
 	var ext strings.Builder
-	if len(a.Protocols) > 0 {
+	if len(a.Protocols) > 0 || len(a.FileTypes) > 0 {
 		ext.WriteString("\n      <Extensions>")
 		for _, p := range a.Protocols {
 			fmt.Fprintf(&ext, "\n        <uap:Extension Category=\"windows.protocol\"><uap:Protocol Name=\"%s\"/></uap:Extension>", e(strings.ToLower(p)))
+		}
+		for _, t := range a.FileTypes {
+			fmt.Fprintf(&ext, "\n        <uap:Extension Category=\"windows.fileTypeAssociation\"><uap:FileTypeAssociation Name=\"%s\"><uap:DisplayName>%s</uap:DisplayName><uap:SupportedFileTypes>", e(t.Name), e(t.DisplayName))
+			for _, x := range t.Extensions {
+				fmt.Fprintf(&ext, "<uap:FileType>%s</uap:FileType>", e(x))
+			}
+			ext.WriteString("</uap:SupportedFileTypes></uap:FileTypeAssociation></uap:Extension>")
 		}
 		ext.WriteString("\n      </Extensions>")
 	}

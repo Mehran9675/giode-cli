@@ -66,6 +66,12 @@ func buildMac(tmpDir string, bi *buildInfo) error {
 		}
 	}
 
+	if macBundle != nil {
+		if err := macBundle(tmpDest); err != nil {
+			return err
+		}
+	}
+
 	if bi.key != "" {
 		if err := builder.signProgram(bi, tmpDest, name, "universal"); err != nil {
 			return err

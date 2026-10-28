@@ -2,6 +2,7 @@ package msix
 
 import (
 	"archive/zip"
+	"encoding/xml"
 	"image"
 	"image/png"
 	"io"
@@ -114,5 +115,21 @@ func TestSign(t *testing.T) {
 	r.Close()
 	if !found {
 		t.Error("no AppxSignature.p7x after signing")
+	}
+}
+
+func TestManifest_FileTypes(t *testing.T) {
+	m, err := Manifest(App{Name: "Player", IdentityName: "com.example.player", Publisher: "CN=Example", Version: "1.0.0",
+		FileTypes: []FileType{{Name: "mkv", DisplayName: "MKV video", Extensions: []string{".mkv", ".mk3d"}}}}, "x64", "Player.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := xml.Unmarshal([]byte(m), new(struct{})); err != nil {
+		t.Fatalf("manifest isn't XML: %v\n%s", err, m)
+	}
+	for _, w := range []string{`Category="windows.fileTypeAssociation"`, `<uap:FileTypeAssociation Name="mkv">`, `<uap:FileType>.mk3d</uap:FileType>`} {
+		if !strings.Contains(m, w) {
+			t.Errorf("lacks %s:\n%s", w, m)
+		}
 	}
 }

@@ -38,6 +38,13 @@ type Config struct {
 	// ContextActions add entries to the file manager's right-click menu
 	// that open the app with the chosen paths.
 	ContextActions []ContextAction `toml:"context_actions"`
+	// Native bundles the shared libraries a cgo app loads.
+	Native Native `toml:"native"`
+	// FileTypes are the file types the app opens: "Open with" on every
+	// desktop.
+	FileTypes []FileType `toml:"file_types"`
+	// CI configures giode ci.
+	CI CI `toml:"ci"`
 
 	// Dir is the directory holding giode.toml; paths in it are
 	// relative to Dir.
@@ -195,11 +202,22 @@ type MacOS struct {
 // Windows configures Windows builds.
 type Windows struct {
 	// Arch is the GOARCH, amd64 by default.
-	Arch      string           `toml:"arch"`
-	Signing   WindowsSigning   `toml:"signing"`
-	Installer WindowsInstaller `toml:"installer"`
-	MSIX      WindowsMSIX      `toml:"msix"`
-	Winget    WindowsWinget    `toml:"winget"`
+	Arch string `toml:"arch"`
+	// CC turns on cgo for Windows builds, compiling C with it: a
+	// MinGW-w64 compiler ("x86_64-w64-mingw32-gcc" cross-compiling,
+	// "gcc" in MSYS2). Gio itself doesn't need cgo on Windows; an app
+	// linking a C library (libmpv) does. CXX is the C++ compiler, and
+	// PkgConfigPath the directory (or list) pkg-config searches for the
+	// Windows libraries' .pc files; PkgConfig the pkg-config command
+	// ("x86_64-w64-mingw32-pkg-config"), pkg-config by default.
+	CC            string           `toml:"cc"`
+	CXX           string           `toml:"cxx"`
+	PkgConfig     string           `toml:"pkg_config"`
+	PkgConfigPath string           `toml:"pkg_config_path"`
+	Signing       WindowsSigning   `toml:"signing"`
+	Installer     WindowsInstaller `toml:"installer"`
+	MSIX          WindowsMSIX      `toml:"msix"`
+	Winget        WindowsWinget    `toml:"winget"`
 }
 
 // WindowsMSIX configures MSIX packages (giode build msix), for the
@@ -427,6 +445,7 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("app.build must be at least 1"))
 	}
 	errs = append(errs, c.validateContextActions()...)
+	errs = append(errs, c.validateFileTypes()...)
 	if _, err := c.ParseLinks(); err != nil {
 		errs = append(errs, err)
 	}
@@ -488,4 +507,127 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// WindowsCgoEnv is the environment of cgo Windows builds: empty when
+// windows.cc isn't set.
+func (c *Config) WindowsCgoEnv() []string {
+	w := c.Windows
+	if w.CC == "" {
+		return nil
+	}
+	env := []string{"CGO_ENABLED=1", "CC=" + w.CC}
+	if w.CXX != "" {
+		env = append(env, "CXX="+w.CXX)
+	}
+	if w.PkgConfig != "" {
+		env = append(env, "PKG_CONFIG="+w.PkgConfig)
+	}
+	if w.PkgConfigPath != "" {
+		p := w.PkgConfigPath
+		if !filepath.IsAbs(p) && !strings.ContainsRune(p, filepath.ListSeparator) {
+			p = c.Path(p)
+		}
+		env = append(env, "PKG_CONFIG_PATH="+p, "PKG_CONFIG_LIBDIR="+p)
+	}
+	return env
+}
+
+// Native configures bundling the shared libraries a cgo app loads -
+// libmpv and the libraries it brings - into its packages: next to the
+// Windows executable (and in the installer and MSIX), in the macOS app's
+// Contents/Frameworks with their install names rewritten, and in a
+// Linux package's lib/<command> directory on the binary's run path.
+// giode finds them by reading the binary's imports, recursively,
+// leaving out the system's.
+type Native struct {
+	// Bundle turns it on.
+	Bundle bool `toml:"bundle"`
+	// Exclude are library names (globs) never bundled.
+	Exclude []string       `toml:"exclude"`
+	Windows NativePlatform `toml:"windows"`
+	MacOS   NativePlatform `toml:"macos"`
+	Linux   NativeLinux    `toml:"linux"`
+}
+
+// NativePlatform configures one platform's libraries.
+type NativePlatform struct {
+	// Search are directories libraries are looked up in: MSYS2's
+	// mingw64/bin, a MinGW sysroot's bin, Homebrew's lib.
+	Search []string `toml:"search"`
+	// Libraries are bundled besides the imported ones: plugins loaded
+	// at run time.
+	Libraries []string `toml:"libraries"`
+	// Exclude adds to Native.Exclude.
+	Exclude []string `toml:"exclude"`
+}
+
+// NativeLinux configures Linux's libraries.
+type NativeLinux struct {
+	NativePlatform
+	// System leaves the libraries to the system's packages instead of
+	// bundling them in .deb and .rpm packages: DebDepends are added to
+	// the .deb's Depends, and the .rpm requires the libraries' sonames
+	// (and RPMRequires). AppImages and Flatpaks still bundle them.
+	System      bool     `toml:"system"`
+	DebDepends  []string `toml:"deb_depends"`
+	RPMRequires []string `toml:"rpm_requires"`
+}
+
+// FileType is a kind of file the app opens.
+type FileType struct {
+	// Name describes the type ("MKV video").
+	Name string `toml:"name"`
+	// Extensions without the dot ("mkv"), and MIME types
+	// ("video/x-matroska").
+	Extensions []string `toml:"extensions"`
+	MIMETypes  []string `toml:"mime_types"`
+	// Role is "viewer" (default) or "editor", for macOS.
+	Role string `toml:"role"`
+	// UTI is the macOS type identifier ("org.matroska.mkv"); when the
+	// system doesn't know it, giode declares it from the extensions
+	// and MIME types (UTImportedTypeDeclarations).
+	UTI string `toml:"uti"`
+	// Icon is a document icon for the type (optional; .ico for Windows).
+	Icon string `toml:"icon"`
+}
+
+// CI configures giode ci's workflow.
+type CI struct {
+	// Setup are shell commands run before building on each runner,
+	// by OS: macos, linux, windows (bash in MSYS2's shell when
+	// windows_msys2 is set) - installing the C libraries a cgo app
+	// links: "brew install mpv".
+	Setup CISetup `toml:"setup"`
+	// WindowsMSYS2 sets up MSYS2 on the Windows runner, with its
+	// MINGW64 toolchain, for cgo apps.
+	WindowsMSYS2 bool `toml:"windows_msys2"`
+}
+
+// CISetup holds setup commands by runner OS.
+type CISetup struct {
+	MacOS   string `toml:"macos"`
+	Linux   string `toml:"linux"`
+	Windows string `toml:"windows"`
+}
+
+// NativeOptions returns the library search settings for a platform:
+// windows, darwin or linux.
+func (c *Config) NativeOptions(goos string) (search, libs, exclude []string) {
+	var p NativePlatform
+	switch goos {
+	case "windows":
+		p = c.Native.Windows
+	case "darwin":
+		p = c.Native.MacOS
+	default:
+		p = c.Native.Linux.NativePlatform
+	}
+	for _, s := range p.Search {
+		search = append(search, c.Path(s))
+	}
+	for _, l := range p.Libraries {
+		libs = append(libs, c.Path(l))
+	}
+	return search, libs, append(append([]string{}, c.Native.Exclude...), p.Exclude...)
 }

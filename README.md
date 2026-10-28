@@ -80,7 +80,7 @@ to print what they run. Targets have short names too: `apk`, `bundle`, `win`, `m
 | --- | --- | --- |
 | `android`, `aab` | Linux, macOS, Windows | Android SDK with build tools, a platform and the NDK; a JDK |
 | `ios`, `ios-sim`, `macos`, `dmg` | macOS | Xcode; for `ios`, a provisioning profile |
-| `windows` | Linux, macOS, Windows | nothing extra: Gio doesn't need cgo on Windows |
+| `windows` | Linux, macOS, Windows | nothing extra for pure-Go apps (Gio doesn't need cgo on Windows); a cgo app needs a MinGW-w64 compiler and pkg-config for Windows: `windows.cc` |
 | `msix`, `winget` | Linux, macOS, Windows | nothing extra for `msix` (giode writes it); `winget` builds the setup program, so NSIS |
 | `windows-installer` | Linux, macOS, Windows | [NSIS](https://nsis.sourceforge.io) (`winget install NSIS.NSIS`, `brew install makensis`, `apt install nsis`) |
 | `linux` | Linux | gcc and Gio's Wayland/X11/EGL development packages |
@@ -159,6 +159,9 @@ microphone = "To dictate messages."
 
 [windows]
 arch = "amd64"
+cc = "x86_64-w64-mingw32-gcc"         # cgo apps: the C compiler for Windows (gcc in MSYS2)
+pkg_config_path = "win64/lib/pkgconfig" # the Windows libraries' .pc files
+# cxx = "x86_64-w64-mingw32-g++"; pkg_config = "x86_64-w64-mingw32-pkg-config"
 
 [windows.installer]
 per_machine = false           # true: all users, Program Files, asks for admin
@@ -302,6 +305,83 @@ when go isn't in module mode, or your module already replaces `gioui.org`, vendo
 dependencies or is in a Go workspace, or when your Gio version doesn't have the code the patch expects. Set
 `gio_patches = false` under `[app]` to build against plain Gio (or under `[android]` for
 Android builds only).
+
+## Native libraries
+
+A cgo app linking shared libraries (libmpv and the dozens it brings) needs them in its
+packages. With `[native] bundle = true`, giode reads the built binary's imports
+(PE, ELF or Mach-O, recursively, so it works when cross-building), leaves out the
+system's (Windows' DLLs, macOS' `/usr/lib` and `/System`, a Linux desktop's C library,
+graphics, windowing and sound stacks) and bundles the rest:
+
+| Target | Where they go |
+| --- | --- |
+| `windows`, `windows-installer`, `msix`, `winget` | next to the `.exe`, installed (and uninstalled) with it |
+| `macos`, `dmg` | `Contents/Frameworks`, renamed `@rpath/<name>` with every reference rewritten and the executable given the run path (as `dylibbundler` does), signed with the app |
+| `linux`, `appimage`, `flatpak`, `deb`, `rpm` | `lib/` next to the binary, or the package's `lib/<command>`; the binary's run path finds them |
+
+```toml
+[native]
+bundle = true
+exclude = ["libvulkan*"]              # never bundled
+
+[native.windows]
+search = ["C:/msys64/mingw64/bin"]    # where the DLLs are (MSYS2, a MinGW sysroot)
+
+[native.macos]
+search = ["/opt/homebrew/lib"]
+
+[native.linux]
+system = true                         # .deb and .rpm depend on the system's packages instead
+deb_depends = ["libmpv2"]             # the .rpm requires the libraries' sonames
+libraries = ["/usr/lib/x86_64-linux-gnu/libva-drm.so.2"]  # also bundled: plugins loaded at run time
+```
+
+Libraries a binary imports that aren't the system's and aren't found are listed in a
+warning. `giode doctor` checks the tools: `install_name_tool` and `codesign` on macOS,
+`windows.cc` and pkg-config for Windows cgo builds.
+
+## File associations
+
+`[[file_types]]` puts the app in "Open with" for those files on every desktop:
+
+```toml
+[[file_types]]
+name = "MKV video"
+extensions = ["mkv", "mk3d"]
+mime_types = ["video/x-matroska"]
+# uti = "org.matroska.mkv"   # macOS type; giode declares one from the extensions when unset
+# role = "editor"            # macOS; viewer by default
+
+[[file_types]]
+name = "Player playlist"
+extensions = ["gpl"]          # no MIME type: giode declares application/x-<command>-gpl on Linux
+```
+
+- macOS: `CFBundleDocumentTypes` in Info.plist, and `UTImportedTypeDeclarations` for the
+  types giode declares. The files arrive as `file://` URLs through `Config.OnOpenURL`.
+- Windows: the setup program registers a ProgID per type, `OpenWithProgids` for each
+  extension and the app's `SupportedTypes`, and removes them on uninstall; MSIX declares
+  `windows.fileTypeAssociation`. The file's path is the program's argument.
+- Linux: the `.desktop` file's `MimeType`, and a shared-mime-info package for types only
+  the app knows. The file's path is the program's argument.
+
+## CI for cgo apps
+
+`giode ci`'s workflow installs what Gio needs; a cgo app's C libraries come from
+`[ci] setup`, commands run on each runner before building. `windows_msys2` builds the
+Windows packages on a Windows runner in MSYS2's MINGW64 environment, where libraries like
+libmpv are a `pacman` away, instead of cross-building them on Linux:
+
+```toml
+[ci]
+windows_msys2 = true
+
+[ci.setup]
+macos = "brew install mpv"
+linux = "sudo apt-get install -y libmpv-dev"
+windows = "pacman -S --noconfirm mingw-w64-x86_64-mpv"
+```
 
 ## Android libraries
 

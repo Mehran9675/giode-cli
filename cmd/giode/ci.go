@@ -110,6 +110,17 @@ the app for Linux (deb, rpm, web), Windows (setup program, MSIX), Android
 provide, and attaches everything to a GitHub release. The tag sets the
 version and the run number the build number.
 
+In giode.toml, [ci] setup runs commands before building on each runner
+(installing the C libraries a cgo app links), and ci.windows_msys2 builds
+the Windows packages on a Windows runner with MSYS2's MINGW64 toolchain:
+
+	[ci]
+	windows_msys2 = true
+	[ci.setup]
+	macos = "brew install mpv"
+	linux = "sudo apt-get install -y libmpv-dev"
+	windows = "pacman -S --noconfirm mingw-w64-x86_64-mpv"
+
 Secrets it uses when set (Settings > Secrets and variables > Actions):
 
 	ANDROID_KEYSTORE_BASE64, GIODE_KEYSTORE_PASS   Android release keystore
@@ -137,14 +148,90 @@ func cmdCI(args []string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	wf := strings.NewReplacer("{{KEYSTORE}}", orDefault(c.Android.Keystore, "release.keystore"),
-		"{{CERT}}", orDefault(c.Windows.Signing.Certificate, "codesign.pfx")).Replace(releaseWorkflow)
-	if err := os.WriteFile(path, []byte(wf), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(workflow(c)), 0o644); err != nil {
 		return err
 	}
 	fmt.Printf("Wrote %s. Push a tag to release: git tag v%s && git push --tags\n", relPath(path), c.App.Version)
 	return nil
 }
+
+// workflow returns the release workflow for the project: with its
+// [ci] setup commands, and the Windows build on a Windows runner with
+// MSYS2 when ci.windows_msys2 is set (cgo apps linking C libraries).
+func workflow(c *config.Config) string {
+	step := func(cmds string, indent string) string {
+		if strings.TrimSpace(cmds) == "" {
+			return ""
+		}
+		var b strings.Builder
+		b.WriteString(indent + "- name: Project setup (giode.toml ci.setup)\n" + indent + "  run: |\n")
+		for _, l := range strings.Split(strings.TrimRight(cmds, "\n"), "\n") {
+			b.WriteString(indent + "    " + l + "\n")
+		}
+		return b.String()
+	}
+	linuxWindows := "          # Signed when the repository has the certificate or keystore.\n" +
+		"          win=\"\"; if [ -n \"$GIODE_WINDOWS_CERT_PASS\" ]; then win=\"-release\"; fi\n" +
+		"          giode build $win windows-installer msix\n"
+	windowsPaths := "            dist/windows/*.exe\n            dist/windows/*.msix\n"
+	windowsJob, needs := "", "linux, macos"
+	if c.CI.WindowsMSYS2 {
+		linuxWindows, windowsPaths, needs = "", "", "linux, macos, windows"
+		windowsJob = strings.NewReplacer("{{SETUP}}", step(c.CI.Setup.Windows, "      "),
+			"{{CERT}}", orDefault(c.Windows.Signing.Certificate, "codesign.pfx")).Replace(windowsMSYS2Job)
+	}
+	return strings.NewReplacer(
+		"{{KEYSTORE}}", orDefault(c.Android.Keystore, "release.keystore"),
+		"{{CERT}}", orDefault(c.Windows.Signing.Certificate, "codesign.pfx"),
+		"{{LINUX_SETUP}}\n", step(c.CI.Setup.Linux, "      "),
+		"{{MACOS_SETUP}}\n", step(c.CI.Setup.MacOS, "      "),
+		"{{LINUX_WINDOWS}}\n", linuxWindows,
+		"{{WINDOWS_PATHS}}\n", windowsPaths,
+		"{{WINDOWS_JOB}}\n", windowsJob,
+		"{{NEEDS}}", needs,
+	).Replace(releaseWorkflow)
+}
+
+// windowsMSYS2Job builds the Windows packages on a Windows runner, in
+// MSYS2's MINGW64 environment, for cgo apps.
+const windowsMSYS2Job = `  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-nsis
+      - run: go install github.com/mehran9675/giode-cli/cmd/giode@latest
+{{SETUP}}      - name: Signing certificate
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+        run: |
+          if [ -n "$WINDOWS_CERT_BASE64" ]; then echo "$WINDOWS_CERT_BASE64" | base64 -d > {{CERT}}; fi
+      - name: Build
+        env:
+          GIODE_WINDOWS_CERT_PASS: ${{ secrets.GIODE_WINDOWS_CERT_PASS }}
+        run: |
+          win=""; if [ -n "$GIODE_WINDOWS_CERT_PASS" ]; then win="-release"; fi
+          "$(go env GOPATH)/bin/giode" build $win windows-installer msix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/windows/*.exe
+            dist/windows/*.msix
+
+`
 
 func orDefault(s, d string) string {
 	if s == "" {
@@ -182,6 +269,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev libffi-dev libxcursor-dev libvulkan-dev nsis osslsigncode
           go install github.com/mehran9675/giode-cli/cmd/giode@latest
+{{LINUX_SETUP}}
       - name: Signing keys
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -195,9 +283,7 @@ jobs:
           GIODE_WINDOWS_CERT_PASS: ${{ secrets.GIODE_WINDOWS_CERT_PASS }}
         run: |
           giode build deb rpm web
-          # Signed when the repository has the certificate or keystore.
-          win=""; if [ -n "$GIODE_WINDOWS_CERT_PASS" ]; then win="-release"; fi
-          giode build $win windows-installer msix
+{{LINUX_WINDOWS}}
           apk=""; if [ -n "$GIODE_KEYSTORE_PASS" ]; then apk="-release"; fi
           giode build $apk android aab
       - uses: actions/upload-artifact@v4
@@ -206,8 +292,7 @@ jobs:
           path: |
             dist/linux/*.deb
             dist/linux/*.rpm
-            dist/windows/*.exe
-            dist/windows/*.msix
+{{WINDOWS_PATHS}}
             dist/android/*.apk
             dist/android/*.aab
             dist/android/native-debug-symbols.zip
@@ -222,6 +307,7 @@ jobs:
         with:
           go-version: stable
       - run: go install github.com/mehran9675/giode-cli/cmd/giode@latest
+{{MACOS_SETUP}}
       - name: Signing certificate
         if: env.MACOS_CERT_BASE64 != ''
         env:
@@ -246,8 +332,9 @@ jobs:
           name: macos
           path: dist/macos/*.dmg
 
+{{WINDOWS_JOB}}
   publish:
-    needs: [linux, macos]
+    needs: [{{NEEDS}}]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:

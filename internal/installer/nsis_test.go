@@ -146,3 +146,79 @@ func TestBuild_ContextMenuUnderWine(t *testing.T) {
 	}
 	t.Error("context menu key left after uninstalling")
 }
+
+func TestScript_FilesAndFileTypes(t *testing.T) {
+	s, err := Script(Options{Name: "Player", ID: "com.example.player", Version: "1.0.0", Exe: `C:\b\Player.exe`, Output: "setup.exe",
+		Files:     []string{"/b/libmpv-2.dll", "/b/avcodec-61.dll"},
+		FileTypes: []FileType{{ProgID: "com.example.player.mkv", Name: "MKV video", Extensions: []string{".mkv", ".mk3d"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{
+		`File "/b/libmpv-2.dll"`,
+		`Delete "$INSTDIR\libmpv-2.dll"`,
+		`WriteRegStr ${REGROOT} "Software\Classes\com.example.player.mkv" "" "MKV video"`,
+		`WriteRegStr ${REGROOT} "Software\Classes\com.example.player.mkv\shell\open\command" "" '"$INSTDIR\${EXE}" "%1"'`,
+		`WriteRegStr ${REGROOT} "Software\Classes\.mkv\OpenWithProgids" "com.example.player.mkv" ""`,
+		`DeleteRegValue ${REGROOT} "Software\Classes\.mk3d\OpenWithProgids" "com.example.player.mkv"`,
+		`SHChangeNotify`,
+	} {
+		if !strings.Contains(s, w) {
+			t.Errorf("script lacks %s", w)
+		}
+	}
+}
+
+// TestBuild_FileTypesUnderWine installs and uninstalls a setup program
+// registering a file type and a bundled DLL.
+func TestBuild_FileTypesUnderWine(t *testing.T) {
+	if _, err := findMakensis(); err != nil {
+		t.Skip(err)
+	}
+	wine, err := exec.LookPath("wine")
+	if err != nil {
+		t.Skip("no wine")
+	}
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "FtApp.exe")
+	os.WriteFile(exe, []byte("MZ"), 0o755)
+	dll := filepath.Join(dir, "libmpv-2.dll")
+	os.WriteFile(dll, []byte("MZ dll"), 0o644)
+	out := filepath.Join(dir, "setup.exe")
+	o := Options{Name: "FtApp", ID: "com.example.ftapp", Version: "1.0.0", Publisher: "Acme", Exe: exe, Output: out,
+		Files:     []string{dll},
+		FileTypes: []FileType{{ProgID: "com.example.ftapp.ftv", Name: "FT video", Extensions: []string{".ftv"}}}}
+	if err := Build(o); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) string {
+		cmd := exec.Command(wine, args...)
+		cmd.Env = append(os.Environ(), "WINEDEBUG=-all")
+		b, _ := cmd.CombinedOutput()
+		return string(b)
+	}
+	run(out, "/S")
+	defer run("reg", "delete", `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\com.example.ftapp`, "/f")
+	if got := run("reg", "query", `HKCU\Software\Classes\com.example.ftapp.ftv\shell\open\command`); !strings.Contains(got, `FtApp.exe" "%1"`) {
+		t.Fatalf("open command after install:\n%s", got)
+	}
+	if got := run("reg", "query", `HKCU\Software\Classes\.ftv\OpenWithProgids`); !strings.Contains(got, "com.example.ftapp.ftv") {
+		t.Errorf("OpenWithProgids:\n%s", got)
+	}
+	appDir := strings.TrimSpace(run("cmd", "/c", `echo %LOCALAPPDATA%`)) + `\Programs\FtApp`
+	if got := run("cmd", "/c", "dir", "/b", appDir); !strings.Contains(got, "libmpv-2.dll") {
+		t.Errorf("installed files:\n%s", got)
+	}
+	run(appDir+`\Uninstall.exe`, "/S")
+	for i := 0; i < 50; i++ {
+		if got := run("reg", "query", `HKCU\Software\Classes\com.example.ftapp.ftv`); !strings.Contains(got, "FT video") {
+			if got := run("reg", "query", `HKCU\Software\Classes\.ftv\OpenWithProgids`); strings.Contains(got, "com.example.ftapp.ftv") {
+				t.Error("OpenWithProgids entry left after uninstalling")
+			}
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Error("file type left after uninstalling")
+}

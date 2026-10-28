@@ -10,6 +10,7 @@ import (
 	"image"
 	"image/png"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -45,7 +46,21 @@ type App struct {
 	FlatpakPermissions []string
 	// Schemes are URL schemes the app opens.
 	Schemes []string
+	// Libs are shared libraries bundled in a private directory,
+	// <prefix>/lib/<command>, which the binary's run path includes.
+	Libs []string
+	// Depends are more Debian packages the app needs; Requires more RPM
+	// requirements (sonames, "libmpv.so.2()(64bit)").
+	Depends, Requires []string
+	// MIMETypes are file types the app opens ("Open with"); MIMEXML a
+	// shared-mime-info package declaring the ones only it knows.
+	MIMETypes []string
+	MIMEXML   string
 }
+
+// LibDir is where a package's bundled libraries go, below its prefix
+// (/usr, /app, an AppDir's usr).
+func LibDir(command string) string { return "lib/" + command }
 
 // File is a file to install, by absolute path.
 type File struct {
@@ -69,6 +84,16 @@ func Files(a App, prefix string) ([]File, error) {
 		{Path: prefix + "/bin/" + a.Command, Body: bin, Mode: 0o755},
 		{Path: prefix + "/share/applications/" + a.ID + ".desktop", Body: []byte(DesktopEntry(a)), Mode: 0o644},
 		{Path: prefix + "/share/metainfo/" + a.ID + ".metainfo.xml", Body: []byte(Metainfo(a)), Mode: 0o644},
+	}
+	if a.MIMEXML != "" {
+		files = append(files, File{Path: prefix + "/share/mime/packages/" + a.ID + ".xml", Body: []byte(a.MIMEXML), Mode: 0o644})
+	}
+	for _, l := range a.Libs {
+		b, err := os.ReadFile(l)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, File{Path: prefix + "/" + LibDir(a.Command) + "/" + filepath.Base(l), Body: b, Mode: 0o644})
 	}
 	if a.Icon != "" {
 		icons, err := Icons(a.Icon)
@@ -118,11 +143,11 @@ func DesktopEntry(a App) string {
 		fmt.Fprintf(&b, "Comment=%s\n", a.Summary)
 	}
 	fmt.Fprintf(&b, "Exec=%s %%U\nIcon=%s\nCategories=%s\nTerminal=false\nStartupWMClass=%s\n", a.Command, a.ID, cats, a.Command)
-	if len(a.Schemes) > 0 {
-		var types []string
-		for _, s := range a.Schemes {
-			types = append(types, "x-scheme-handler/"+s)
-		}
+	types := append([]string{}, a.MIMETypes...)
+	for _, s := range a.Schemes {
+		types = append(types, "x-scheme-handler/"+s)
+	}
+	if len(types) > 0 {
 		fmt.Fprintf(&b, "MimeType=%s;\n", strings.Join(types, ";"))
 	}
 	return b.String()

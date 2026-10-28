@@ -55,6 +55,9 @@ func RPM(a App, out string) error {
 	for _, so := range rpmRequires {
 		requires.Set(so + "()" + suffix)
 	}
+	for _, r := range a.Requires {
+		requires.Set(r)
+	}
 	r, err := rpmpack.NewRPM(rpmpack.RPMMetaData{
 		Name: packageName(a.Command), Summary: summary, Description: desc,
 		Version: a.Version, Release: strconv.Itoa(max(a.Build, 1)), Arch: arch, OS: "linux",

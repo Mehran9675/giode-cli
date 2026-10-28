@@ -31,6 +31,11 @@ type Options struct {
 	// Exe is the built program; Icon a PNG for the setup program's icon
 	// (optional); License a text file to accept (optional).
 	Exe, Icon, License string
+	// Files are installed next to the program: the DLLs it loads.
+	Files []string
+	// FileTypes are registered for Explorer's "Open with", and removed
+	// on uninstall.
+	FileTypes []FileType
 	// PerMachine installs for every user, asking for administrator
 	// rights; otherwise for the current user without asking.
 	PerMachine bool
@@ -43,6 +48,15 @@ type Options struct {
 	Output string
 	// Verbose prints the makensis command and its output.
 	Verbose bool
+}
+
+// FileType is a file type the app opens: its ProgID (a class of its
+// own, "com.example.player.mkv"), description, extensions with the dot
+// and an optional icon (.ico).
+type FileType struct {
+	ProgID, Name string
+	Extensions   []string
+	Icon         string
 }
 
 // Verb is an Explorer context menu entry: a key under
@@ -82,8 +96,10 @@ func Build(o Options) error {
 	if o.License != "" {
 		d.License = abs(o.License)
 	}
-	if st, err := os.Stat(o.Exe); err == nil {
-		d.SizeKB = (st.Size() + 1023) / 1024
+	for _, f := range append([]string{o.Exe}, o.Files...) {
+		if st, err := os.Stat(f); err == nil {
+			d.SizeKB += (st.Size() + 1023) / 1024
+		}
 	}
 	var script bytes.Buffer
 	if err := nsisTemplate.Execute(&script, d); err != nil {
@@ -201,6 +217,12 @@ var nsisTemplate = template.Must(template.New("nsis").Funcs(template.FuncMap{
 		s = strings.ReplaceAll(s, `"`, `$\"`)
 		return `"` + s + `"`
 	},
+	// base is a file's name, escaped for inside a quoted string.
+	"base": func(s string) string {
+		s = filepath.Base(s)
+		s = strings.ReplaceAll(s, "$", "$$")
+		return strings.ReplaceAll(s, `"`, `$\"`)
+	},
 }).Parse(`Unicode true
 ManifestDPIAware true
 SetCompressor /SOLID lzma
@@ -277,6 +299,12 @@ FunctionEnd
 Section "Install"
 	SetOutPath "$INSTDIR"
 	File {{q .Exe}}
+{{- range .Files}}
+	File {{q .}}
+{{- end}}
+{{- range .FileTypes}}{{if .Icon}}
+	File {{q .Icon}}
+{{- end}}{{end}}
 	WriteUninstaller "$INSTDIR\Uninstall.exe"
 	CreateShortCut "$SMPROGRAMS\${APPNAME}.lnk" "$INSTDIR\${EXE}"
 {{- if .DesktopShortcut}}
@@ -295,6 +323,19 @@ Section "Install"
 	WriteRegDWORD ${REGROOT} "${UNINST_KEY}" "NoModify" 1
 	WriteRegDWORD ${REGROOT} "${UNINST_KEY}" "NoRepair" 1
 	WriteRegDWORD ${REGROOT} "${UNINST_KEY}" "EstimatedSize" {{.SizeKB}}
+{{- range .FileTypes}}
+	WriteRegStr ${REGROOT} {{q (printf "Software\\Classes\\%s" .ProgID)}} "" {{q .Name}}
+	WriteRegStr ${REGROOT} {{q (printf "Software\\Classes\\%s\\DefaultIcon" .ProgID)}} "" {{if .Icon}}"$INSTDIR\{{base .Icon}}"{{else}}"$INSTDIR\${EXE},0"{{end}}
+	WriteRegStr ${REGROOT} {{q (printf "Software\\Classes\\%s\\shell\\open\\command" .ProgID)}} "" '"$INSTDIR\${EXE}" "%1"'
+{{- $id := .ProgID}}
+{{- range .Extensions}}
+	WriteRegStr ${REGROOT} {{q (printf "Software\\Classes\\%s\\OpenWithProgids" .)}} {{q $id}} ""
+	WriteRegStr ${REGROOT} "Software\Classes\Applications\${EXE}\SupportedTypes" {{q .}} ""
+{{- end}}
+{{- end}}
+{{- if .FileTypes}}
+	System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+{{- end}}
 {{- range .ContextMenu}}
 	WriteRegStr ${REGROOT} {{q (printf "Software\\Classes\\%s" .Key)}} "MUIVerb" {{q .Label}}
 	WriteRegStr ${REGROOT} {{q (printf "Software\\Classes\\%s" .Key)}} "Icon" "$INSTDIR\${EXE}"
@@ -304,7 +345,23 @@ SectionEnd
 
 Section "Uninstall"
 	Delete "$INSTDIR\${EXE}"
+{{- range .Files}}
+	Delete "$INSTDIR\{{base .}}"
+{{- end}}
 	Delete "$INSTDIR\Uninstall.exe"
+{{- range .FileTypes}}
+	DeleteRegKey ${REGROOT} {{q (printf "Software\\Classes\\%s" .ProgID)}}
+{{- $id := .ProgID}}
+{{- range .Extensions}}
+	DeleteRegValue ${REGROOT} {{q (printf "Software\\Classes\\%s\\OpenWithProgids" .)}} {{q $id}}
+{{- end}}
+{{- if .Icon}}
+	Delete "$INSTDIR\{{base .Icon}}"
+{{- end}}
+{{- end}}
+{{- if .FileTypes}}
+	DeleteRegKey ${REGROOT} "Software\Classes\Applications\${EXE}"
+{{- end}}
 	RMDir "$INSTDIR"
 	Delete "$SMPROGRAMS\${APPNAME}.lnk"
 	Delete "$DESKTOP\${APPNAME}.lnk"

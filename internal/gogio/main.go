@@ -100,14 +100,26 @@ type Options struct {
 	// apps; AndroidDependencies are Maven coordinates
 	// (group:artifact:version) resolved, with their dependencies, from
 	// AndroidRepos (maven.DefaultRepos when empty) into MavenCache.
+	// MacBundle, when set, runs on a macOS app bundle after it's built
+	// and before it's signed: bundling libraries into it.
+	MacBundle func(app string) error
+	// Env is added to the environment of the go build of Windows
+	// programs: CGO_ENABLED and CC for cgo apps.
+	Env []string
+
 	AndroidLibs         []string
 	AndroidDependencies []string
 	AndroidRepos        []string
 	MavenCache          string
 }
 
-// modFile is Options.ModFile for the build in progress.
-var modFile string
+// modFile is Options.ModFile for the build in progress, buildEnv its
+// Options.Env.
+var (
+	modFile   string
+	buildEnv  []string
+	macBundle func(app string) error
+)
 
 // goCommand returns a go build or go list command run in the app's
 // module, with -modfile when the build uses one.
@@ -156,10 +168,10 @@ func Build(pkg string, o Options) error {
 	*notaryID, *notaryPass, *notaryTeamID = o.NotaryID, o.NotaryPass, o.NotaryTeamID
 	*schemes, *pkgQueries = strings.Join(o.Schemes, ","), strings.Join(o.Queries, ",")
 	appArgs, extras = o.Args, o.Extras
-	modFile, symbolsDir = o.ModFile, o.SymbolsDir
+	modFile, symbolsDir, buildEnv, macBundle = o.ModFile, o.SymbolsDir, o.Env, o.MacBundle
 	androidLibs, androidDeps, androidRepos, mavenCache = o.AndroidLibs, o.AndroidDependencies, o.AndroidRepos, o.MavenCache
 	defer func() {
-		modFile, symbolsDir = "", ""
+		modFile, symbolsDir, buildEnv, macBundle = "", "", nil, nil
 		androidLibs, androidDeps, androidRepos, mavenCache = nil, nil, nil, ""
 	}()
 	if *buildMode == "" {
