@@ -109,6 +109,8 @@ website = "https://example.com"
 schemes = ["agent"]           # URL schemes the app opens
 links = ["https://example.com/app/*"]   # universal links / App Links; see giode links
 tags = ""                     # Go build tags
+renderer = "opengl"           # Gio's OpenGL renderer on macOS and iOS (Config.Renderer)
+gio_patches = true            # build against Gio with giode's patches (default true)
 ldflags = ""                  # extra linker flags
 output = "dist"
 
@@ -266,10 +268,19 @@ current user into `%LOCALAPPDATA%\Programs`, without an administrator prompt;
 `per_machine = true` installs for everyone into Program Files. It runs silently with
 `/S`. The uninstaller isn't signed yet.
 
-## Patched Gio for Android
+## Patched Gio
 
-`giode build android` (and `aab`, and `giode run android`) builds against a copy of your Gio
-version with two Android fixes Gio hasn't released:
+`giode build` and `giode run` build against a copy of your Gio version with giode's
+patches, adding the `giode_gio` build tag:
+
+- **Underlay hook**, on every platform: what giode's `Config.Underlay` and
+  `Config.Renderer` use to draw video or 3D under the UI. The window calls the hook with
+  the frame's render target before drawing the UI over it without clearing, Gio's OpenGL
+  renderer saves and restores the GL state around its frames, and on Windows it can prefer
+  OpenGL ES (ANGLE) over Direct3D. `renderer = "opengl"` under `[app]` adds the `nometal`
+  tag to macOS and iOS builds, for Gio's OpenGL renderer there.
+
+And two Android fixes Gio hasn't released:
 
 - **Full refresh rate.** Gio asks Android's Choreographer for the next frame only after
   presenting the current one. Presenting waits for a vsync, so the request misses the next
@@ -289,7 +300,8 @@ directory (`giode/gio/<version>-giode<n>`, made again when the patches change), 
 commands run in your module (`GOFLAGS` is left alone). The patch is skipped, with a note,
 when go isn't in module mode, or your module already replaces `gioui.org`, vendors its
 dependencies or is in a Go workspace, or when your Gio version doesn't have the code the patch expects. Set
-`gio_patches = false` under `[android]` to build against plain Gio.
+`gio_patches = false` under `[app]` to build against plain Gio (or under `[android]` for
+Android builds only).
 
 ## Android libraries
 

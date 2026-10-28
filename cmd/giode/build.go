@@ -15,7 +15,6 @@ import (
 	_ "image/jpeg"
 
 	"github.com/mehran9675/giode-cli/internal/config"
-	"github.com/mehran9675/giode-cli/internal/giopatch"
 	"github.com/mehran9675/giode-cli/internal/gogio"
 	"github.com/mehran9675/giode-cli/internal/installer"
 	"github.com/mehran9675/giode-cli/internal/pwa"
@@ -232,21 +231,12 @@ func buildTarget(c *config.Config, target string, o buildOpts) (string, error) {
 		return "", err
 	}
 	defer os.Chdir(wd)
-	if (target == "android" || target == "aab") && (c.Android.GioPatches == nil || *c.Android.GioPatches) {
-		modfile, cleanup, err := giopatch.Prepare(c.Dir, giopatch.Android)
-		switch {
-		case err == nil:
-			defer cleanup()
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  building against patched Gio (%s)\n", modfile)
-			}
-			g.ModFile = modfile
-		case errors.Is(err, giopatch.ErrSkipped):
-			fmt.Fprintf(os.Stderr, "  note: Gio's Android frame pacing fix not applied (%v)\n", err)
-		default:
-			return "", fmt.Errorf("patching Gio: %w (set android.gio_patches = false to skip)", err)
-		}
+	gb, err := prepareGio(c, target)
+	if err != nil {
+		return "", err
 	}
+	defer gb.cleanup()
+	g.ModFile, g.Tags = gb.modfile, gb.tags
 	symbols := ""
 	if (target == "android" || target == "aab") && o.release {
 		// Release builds keep the native libraries' symbols for the Play
@@ -532,10 +522,12 @@ func buildLinux(c *config.Config, o buildOpts) (string, error) {
 		d = filepath.Dir(bin)
 	}
 	ldflags := strings.TrimSpace("-s -w -X gioui.org/app.ID=" + c.App.ID + " " + desktopLdflags(c, "linux"))
-	args := []string{"build", "-trimpath", "-ldflags", ldflags, "-o", bin}
-	if c.App.Tags != "" {
-		args = append(args, "-tags", c.App.Tags)
+	gb, err := prepareGio(c, "linux")
+	if err != nil {
+		return "", err
 	}
+	defer gb.cleanup()
+	args := append([]string{"build", "-trimpath", "-ldflags", ldflags, "-o", bin}, gb.goArgs()...)
 	cmd := command(c, "go", append(args, pkgPath(c))...)
 	if o.arch != "" {
 		cmd.Env = append(os.Environ(), "GOARCH="+o.arch)

@@ -76,6 +76,15 @@ type App struct {
 	// Tags are Go build tags; Ldflags extra linker flags.
 	Tags    string `toml:"tags"`
 	Ldflags string `toml:"ldflags"`
+	// Renderer "opengl" builds macOS and iOS apps with Gio's OpenGL
+	// renderer instead of Metal (the nometal tag), for an app setting
+	// giode.Config.Renderer to RendererOpenGL - an OpenGL video or 3D
+	// engine drawing under the UI (Config.Underlay).
+	Renderer string `toml:"renderer"`
+	// GioPatches builds against a copy of Gio with giode's patches: the
+	// hook behind Config.Underlay and Config.Renderer everywhere, and
+	// android.gio_patches' fixes on Android. True by default.
+	GioPatches *bool `toml:"gio_patches"`
 	// Licenses is a JSON file every build refreshes with the licenses of
 	// the app's modules (see giode licenses).
 	Licenses string `toml:"licenses"`
@@ -441,6 +450,9 @@ func (c *Config) Validate() error {
 		if _, err := plistXML(p); err != nil {
 			errs = append(errs, err)
 		}
+	}
+	if r := c.App.Renderer; r != "" && r != "opengl" {
+		errs = append(errs, fmt.Errorf("app.renderer is %q; the only choice is opengl (leave it out for Gio's default)", r))
 	}
 	for k, v := range map[string]string{"ios.push": c.IOS.Push, "macos.push": c.MacOS.Push} {
 		if v != "" && v != "development" && v != "production" {

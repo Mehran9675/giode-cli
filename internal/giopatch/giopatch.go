@@ -1,6 +1,7 @@
 // Package giopatch builds apps against a patched copy of Gio, for fixes
-// Gio hasn't released yet: on Android, rendering at the display's
-// refresh rate and keeping held keys repeating. The copy lives in the user cache directory;
+// and hooks Gio hasn't released: on Android, rendering at the display's
+// refresh rate and keeping held keys repeating; everywhere, the hook
+// behind giode.App's Config.Underlay. The copy lives in the user cache directory;
 // the app's go.mod is left alone: the build gets a temporary copy of it
 // with a replace directive, passed with -modfile to the go build and go
 // list commands run in the app's module. (Not through GOFLAGS: go
@@ -18,14 +19,15 @@ import (
 	"strings"
 )
 
-// patch replaces old with new in a file of the Gio module.
+// patch replaces old with new in a file of the Gio module, or, with
+// old empty, adds the file with new as its content.
 type patch struct {
 	file, old, new string
 }
 
 // revision changes whenever the patches do, so cached copies made with
 // older patches aren't used.
-const revision = "2"
+const revision = "4"
 
 // androidPacing makes Android render at the display's refresh rate.
 // Gio asks the Choreographer for the next frame only after presenting
@@ -124,8 +126,209 @@ func (w *window) ShowTextInput(show bool) {
 	},
 }
 
+// underlay lets giode.App draw caller-rendered GPU content (video, 3D)
+// under the UI: the window calls a hook with the frame's render target
+// before drawing the UI over it without clearing, with Gio's OpenGL
+// backend restoring the GL state it changes, and can be told to prefer
+// OpenGL where it would pick Direct3D. giode uses app.GiodeSetUnderlay
+// behind the giode_gio build tag, which builds against this copy set.
+var underlay = []patch{
+	{
+		file: "app/window.go",
+		old: `func (w *Window) frame(frame *op.Ops, viewport image.Point) error {
+`,
+		new: `func (w *Window) frame(frame *op.Ops, viewport image.Point) error {
+	// giode: an underlay draws first, then the UI over it, uncleared.
+	if f := giodeUnderlay; f != nil {
+		target, err := w.ctx.RenderTarget()
+		if err != nil {
+			return err
+		}
+		f(giodeTarget(target, viewport))
+		return w.gpu.Frame(frame, target, viewport)
+	}
+`,
+	},
+	{
+		file: "app/window.go",
+		old:  `gpu, err := gpu.New(w.ctx.API())`,
+		new:  `gpu, err := gpu.New(giodeAPI(w.ctx.API()))`,
+	},
+	{
+		file: "app/d3d11_windows.go",
+		old: `		initializer: func(w *window) (context, error) {
+			hwnd, _, _ := w.HWND()
+`,
+		new: `		initializer: func(w *window) (context, error) {
+			if giodeForceGL {
+				return nil, fmt.Errorf("giode: OpenGL requested")
+			}
+			hwnd, _, _ := w.HWND()
+`,
+	},
+	{
+		file: "gpu/internal/opengl/opengl.go",
+		old: `	savedState glState
+	sharedCtx  bool
+`,
+		new: `	savedState glState
+	sharedCtx  bool
+	// giode: the capabilities foreign GL code may leave on that Gio
+	// assumes are off, and their state before the frame.
+	giodeCaps [4]bool
+`,
+	},
+	{
+		file: "gpu/internal/opengl/opengl.go",
+		old: `	if b.sharedCtx {
+		b.glstate = b.queryState()
+		b.savedState = b.glstate
+	}
+`,
+		new: `	if b.sharedCtx {
+		b.glstate = b.queryState()
+		b.savedState = b.glstate
+		for i, c := range giodeCapEnums {
+			b.giodeCaps[i] = b.funcs.IsEnabled(c)
+			if b.giodeCaps[i] {
+				b.funcs.Disable(c)
+			}
+		}
+	}
+`,
+	},
+	{
+		file: "gpu/internal/opengl/opengl.go",
+		old: `	if b.sharedCtx {
+		b.restoreState(b.savedState)
+	}`,
+		new: `	if b.sharedCtx {
+		b.restoreState(b.savedState)
+		for i, c := range giodeCapEnums {
+			if b.giodeCaps[i] {
+				b.funcs.Enable(c)
+			}
+		}
+	}`,
+	},
+	{
+		file: "gpu/internal/opengl/giode_caps.go",
+		new: `// Added by giode's Gio patches.
+
+package opengl
+
+import "gioui.org/internal/gl"
+
+// giodeCapEnums are GL_SCISSOR_TEST, GL_DEPTH_TEST, GL_STENCIL_TEST
+// and GL_CULL_FACE: Gio never enables them, so a shared context's
+// other user leaving one on would clip or drop Gio's drawing.
+var giodeCapEnums = [4]gl.Enum{0x0C11, 0x0B71, 0x0B90, 0x0B44}
+`,
+	},
+	{
+		file: "app/giode_underlay.go",
+		new: `// Added by giode's Gio patches: the hooks behind giode.App's
+// Config.Underlay and Config.Renderer.
+
+package app
+
+import "gioui.org/gpu"
+
+// GiodeTarget describes a frame's render target to an underlay.
+type GiodeTarget struct {
+	// API is 1 for OpenGL (ES), 2 Metal, 3 Direct3D 11, 4 Vulkan.
+	API int
+	// Framebuffer is the OpenGL framebuffer object, 0 for the window's.
+	Framebuffer uint32
+	// Handle is the MTLTexture, the ID3D11RenderTargetView or the VkImage.
+	Handle        uintptr
+	Width, Height int
+}
+
+var (
+	giodeUnderlay func(GiodeTarget)
+	giodeForceGL  bool
+)
+
+// GiodeSetUnderlay sets the function drawing under the UI each frame,
+// with the GPU context current, and whether to prefer OpenGL over
+// Direct3D. Call it before creating windows.
+func GiodeSetUnderlay(f func(GiodeTarget), forceGL bool) {
+	giodeUnderlay, giodeForceGL = f, forceGL
+}
+
+// giodeAPI makes Gio's OpenGL backend save and restore the GL state
+// around its frames when an underlay shares the context.
+func giodeAPI(api gpu.API) gpu.API {
+	if gl, ok := api.(gpu.OpenGL); ok && giodeUnderlay != nil {
+		gl.Shared = true
+		return gl
+	}
+	return api
+}
+`,
+	},
+	{
+		file: "app/giode_target.go",
+		new: `//go:build !js
+
+// Added by giode's Gio patches.
+
+package app
+
+import (
+	"image"
+	"unsafe"
+
+	"gioui.org/gpu"
+)
+
+func giodeTarget(t gpu.RenderTarget, size image.Point) GiodeTarget {
+	g := GiodeTarget{Width: size.X, Height: size.Y}
+	switch t := t.(type) {
+	case gpu.OpenGLRenderTarget:
+		g.API, g.Framebuffer = 1, uint32(t.V)
+	case gpu.MetalRenderTarget:
+		g.API, g.Handle = 2, t.Texture
+	case gpu.Direct3D11RenderTarget:
+		g.API, g.Handle = 3, uintptr(unsafe.Pointer(t.RenderTarget))
+	case gpu.VulkanRenderTarget:
+		g.API, g.Handle = 4, uintptr(t.Image)
+	}
+	return g
+}
+`,
+	},
+	{
+		file: "app/giode_target_js.go",
+		new: `// Added by giode's Gio patches.
+
+package app
+
+import (
+	"image"
+
+	"gioui.org/gpu"
+)
+
+func giodeTarget(t gpu.RenderTarget, size image.Point) GiodeTarget {
+	return GiodeTarget{API: 1, Width: size.X, Height: size.Y}
+}
+`,
+	},
+}
+
 // Android is the set of patches for Android builds.
 var Android = append(append([]patch{}, androidPacing...), androidKeyRepeat...)
+
+// All is every patch, for builds of any target: the Android ones only
+// touch Android's files. Builds against it have the giode_gio tag (see
+// Tag).
+var All = append(append([]patch{}, Android...), underlay...)
+
+// Tag is the build tag of builds against patched Gio, which giode uses
+// to reach the patches' hooks.
+const Tag = "giode_gio"
 
 // ErrSkipped is returned, wrapped, when a module can't be patched:
 // it replaces or vendors Gio itself, or uses a workspace.
@@ -244,6 +447,15 @@ func patchedCopy(m module, patches []patch) (string, error) {
 func apply(dir string, patches []patch) error {
 	for _, p := range patches {
 		file := filepath.Join(dir, filepath.FromSlash(p.file))
+		if p.old == "" {
+			if _, err := os.Stat(file); err == nil {
+				return fmt.Errorf("%w: %s exists already", ErrSkipped, p.file)
+			}
+			if err := os.WriteFile(file, []byte(p.new), 0o644); err != nil {
+				return err
+			}
+			continue
+		}
 		b, err := os.ReadFile(file)
 		if err != nil {
 			return err
