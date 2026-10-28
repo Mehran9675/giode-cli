@@ -27,7 +27,7 @@ type patch struct {
 
 // revision changes whenever the patches do, so cached copies made with
 // older patches aren't used.
-const revision = "6"
+const revision = "7"
 
 // androidPacing makes Android render at the display's refresh rate.
 // Gio asks the Choreographer for the next frame only after presenting
@@ -879,6 +879,97 @@ func (s *wlSeat) giodeDndDrop() {
 	},
 }
 
+// windowsFullscreen makes a fullscreen Windows window a popup covering
+// its monitor. Gio removed the frame and showed the window maximized,
+// and Windows draws the taskbar over a maximized window, even one
+// covering the whole screen. Leaving fullscreen restores the window's
+// earlier place and state.
+var windowsFullscreen = []patch{
+	{
+		file: "app/os_windows.go",
+		old: `	frameDims image.Point
+	loop      *eventLoop
+}
+`,
+		new: `	frameDims image.Point
+	loop      *eventLoop
+	// giode: whether the window is fullscreen (a popup), and its
+	// placement before.
+	giodeFullscreen bool
+	giodePlacement  windows.WindowPlacement
+}
+
+// giodeWSPopup is WS_POPUP.
+const giodeWSPopup = 0x80000000
+`,
+	},
+	{
+		file: "app/os_windows.go",
+		old: `	case p.IsMinimized():
+		// giode: minimized, and restored from it.
+		w.config.Mode = Minimized
+`,
+		new: `	case p.IsMinimized():
+		// giode: minimized, and restored from it.
+		w.config.Mode = Minimized
+	case w.giodeFullscreen:
+		// giode: a fullscreen window is a popup, not maximized.
+		w.config.Mode = Fullscreen
+`,
+	},
+	{
+		file: "app/os_windows.go",
+		old: `	case Fullscreen:
+		swpStyle |= windows.SWP_NOMOVE | windows.SWP_NOSIZE
+		showMode = windows.SW_SHOWMAXIMIZED
+	}
+`,
+		new: `	case Fullscreen:
+		// giode: a popup covering the monitor.
+		if !w.giodeFullscreen {
+			w.giodePlacement = windows.GetWindowPlacement(w.hwnd)
+			w.giodeFullscreen = true
+		}
+		style = style&^windows.WS_MAXIMIZE | giodeWSPopup
+		mi := windows.GetMonitorInfo(w.hwnd)
+		x, y = mi.Monitor.Left, mi.Monitor.Top
+		width, height = mi.Monitor.Right-mi.Monitor.Left, mi.Monitor.Bottom-mi.Monitor.Top
+		swpStyle &^= windows.SWP_NOZORDER
+		if !cnf.TopMost {
+			hwndAfter = windows.HWND_TOP
+		}
+		showMode = windows.SW_SHOWNORMAL
+	}
+	giodeLeaving := w.giodeFullscreen && cnf.Mode != Fullscreen
+	if giodeLeaving {
+		style &^= giodeWSPopup
+		w.giodeFullscreen = false
+	}
+`,
+	},
+	{
+		file: "app/os_windows.go",
+		old: `	windows.ShowWindow(w.hwnd, showMode)
+}
+`,
+		new: `	windows.ShowWindow(w.hwnd, showMode)
+	switch {
+	case cnf.Mode == Fullscreen:
+		// giode: again after ShowWindow, which puts a window that was
+		// maximized back in its normal place.
+		windows.SetWindowPos(w.hwnd, hwndAfter, x, y, width, height, swpStyle)
+	case giodeLeaving && (cnf.Mode == Windowed || cnf.Mode == Maximized):
+		// giode: back where, and as, the window was before.
+		windows.SetWindowPlacement(w.hwnd, &w.giodePlacement)
+		if cnf.Mode == Maximized {
+			windows.ShowWindow(w.hwnd, windows.SW_SHOWMAXIMIZED)
+		}
+	}
+}
+`,
+	},
+}
+
 // inject lets giode's MCP server deliver pointer and key events as the
 // platform would, for its ui_pointer and ui_key tools.
 var inject = []patch{
@@ -916,7 +1007,7 @@ var Android = append(append([]patch{}, androidPacing...), androidKeyRepeat...)
 // All is every patch, for builds of any target: the Android ones only
 // touch Android's files. Builds against it have the giode_gio tag (see
 // Tag).
-var All = append(append(append(append(append([]patch{}, Android...), underlay...), windowsMinimized...), fileDrag...), inject...)
+var All = append(append(append(append(append(append([]patch{}, Android...), underlay...), windowsMinimized...), windowsFullscreen...), fileDrag...), inject...)
 
 // Tag is the build tag of builds against patched Gio, which giode uses
 // to reach the patches' hooks.
