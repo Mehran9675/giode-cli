@@ -96,6 +96,14 @@ type Options struct {
 	// list commands run in the app's module - and only to those, since
 	// go refuses the flag outside module mode.
 	ModFile string
+	// AndroidLibs are local .aar and .jar files built into Android
+	// apps; AndroidDependencies are Maven coordinates
+	// (group:artifact:version) resolved, with their dependencies, from
+	// AndroidRepos (maven.DefaultRepos when empty) into MavenCache.
+	AndroidLibs         []string
+	AndroidDependencies []string
+	AndroidRepos        []string
+	MavenCache          string
 }
 
 // modFile is Options.ModFile for the build in progress.
@@ -133,6 +141,9 @@ type Extras struct {
 	// provisioning profile) signing: strings, booleans and lists of
 	// strings, by key.
 	Entitlements map[string]any
+	// AndroidValues is a res/values resource file added to Android
+	// apps: Firebase's google-services strings.
+	AndroidValues string
 }
 
 // Build builds and packages the Go package pkg as gogio would.
@@ -146,7 +157,11 @@ func Build(pkg string, o Options) error {
 	*schemes, *pkgQueries = strings.Join(o.Schemes, ","), strings.Join(o.Queries, ",")
 	appArgs, extras = o.Args, o.Extras
 	modFile, symbolsDir = o.ModFile, o.SymbolsDir
-	defer func() { modFile, symbolsDir = "", "" }()
+	androidLibs, androidDeps, androidRepos, mavenCache = o.AndroidLibs, o.AndroidDependencies, o.AndroidRepos, o.MavenCache
+	defer func() {
+		modFile, symbolsDir = "", ""
+		androidLibs, androidDeps, androidRepos, mavenCache = nil, nil, nil, ""
+	}()
 	if *buildMode == "" {
 		*buildMode = "exe"
 	}

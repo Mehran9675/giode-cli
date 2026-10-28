@@ -368,6 +368,15 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 		}
 		perms, manifest, app := c.AndroidExtras()
 		g.Extras = gogio.Extras{AndroidPermissions: perms, AndroidManifest: manifest, AndroidApplication: app, AndroidActivity: c.AndroidActivityXML()}
+		values, err := c.GoogleServicesXML()
+		if err != nil {
+			return g, err
+		}
+		g.Extras.AndroidValues = values
+		g.AndroidDependencies, g.AndroidRepos = c.Android.Dependencies, c.Android.Repositories
+		for _, l := range c.Android.Libraries {
+			g.AndroidLibs = append(g.AndroidLibs, c.Path(l))
+		}
 		if o.release {
 			if c.Android.Keystore == "" {
 				return g, errors.New("-release needs android.keystore in giode.toml (giode keystore creates one)")

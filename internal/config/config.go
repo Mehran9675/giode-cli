@@ -124,6 +124,19 @@ type Android struct {
 	// certificates allowed to open app.links: Play App Signing's, from
 	// the Play Console. The keystore's is added by giode links.
 	Fingerprints []string `toml:"fingerprints"`
+	// Dependencies are Android libraries from Maven repositories
+	// (group:artifact:version), built in with their own dependencies:
+	// their classes, resources, manifest entries and native libraries.
+	// giode packages that need one (push, billing, review) add theirs.
+	Dependencies []string `toml:"dependencies"`
+	// Repositories replace the Maven repositories searched (Google's
+	// and Maven Central).
+	Repositories []string `toml:"repositories"`
+	// Libraries are local .aar and .jar files built in.
+	Libraries []string `toml:"libraries"`
+	// GoogleServices is the google-services.json file from the Firebase
+	// console, needed for push notifications (giode/push).
+	GoogleServices string `toml:"google_services"`
 }
 
 // IOS configures iOS builds.
