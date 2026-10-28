@@ -192,6 +192,16 @@ type WindowsInstaller struct {
 type Linux struct {
 	// Categories go in the .desktop file (freedesktop menu categories).
 	Categories []string `toml:"categories"`
+	// Description is the long description packages and software
+	// centers show (app.description is the summary).
+	Description string `toml:"description"`
+	// Maintainer is "Name <email>" for .deb and .rpm metadata.
+	Maintainer string `toml:"maintainer"`
+	// License is the app's SPDX license expression.
+	License string `toml:"license"`
+	// FlatpakPermissions are Flatpak finish-args, replacing the default
+	// display, GPU, network and sound access.
+	FlatpakPermissions []string `toml:"flatpak_permissions"`
 }
 
 // Web configures WebAssembly builds.

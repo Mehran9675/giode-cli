@@ -52,7 +52,7 @@ target needs.
 | --- | --- |
 | `giode new [-id com.example.app] <dir>` | Creates a project: a counter app in `main.go`, `go.mod` with the latest giode, `giode.toml` with the settings to fill in, placeholder assets (`assets/icon.png`, `assets/README.md`), `.gitignore` and a README. |
 | `giode init` | Adds `giode.toml` to an existing Go module. |
-| `giode build <target>...` | Builds into `dist/<platform>`. Targets: `android` (APK), `aab` (Play bundle), `ios` (IPA), `ios-sim`, `macos`, `windows`, `windows-installer` (setup program), `linux`, `web`, `desktop` (this computer) and `all` (everything this computer can build). `-release` signs with your certificates. |
+| `giode build <target>...` | Builds into `dist/<platform>`. Targets: `android` (APK), `aab` (Play bundle), `ios` (IPA), `ios-sim`, `macos`, `windows`, `windows-installer` (setup program), `linux`, `deb`, `rpm`, `appimage`, `flatpak`, `web`, `desktop` (this computer) and `all` (everything this computer can build). `-release` signs with your certificates. |
 | `giode run [target]` | Builds for a target and runs it: `desktop` (default, with `go run`), `linux`, `windows` (Wine off Windows), `windows-installer`, `macos`, `android` (builds the device's architecture, installs, launches, follows the log), `ios-sim`, `web` (serves `dist/web`). `-mcp` starts giode's MCP server so an AI agent can drive the app. |
 | `giode devices` | Lists Android devices and booted iOS simulators. |
 | `giode doctor` | Checks Go, the Android SDK, build tools, platform, NDK and JDK, Xcode, and Gio's Linux libraries, with install commands for what's missing. |
@@ -77,6 +77,9 @@ to print what they run. Targets have short names too: `apk`, `bundle`, `win`, `m
 | `windows` | Linux, macOS, Windows | nothing extra: Gio doesn't need cgo on Windows |
 | `windows-installer` | Linux, macOS, Windows | [NSIS](https://nsis.sourceforge.io) (`winget install NSIS.NSIS`, `brew install makensis`, `apt install nsis`) |
 | `linux` | Linux | gcc and Gio's Wayland/X11/EGL development packages |
+| `deb`, `rpm` | Linux | as `linux`; packages are written by giode itself |
+| `appimage` | Linux | as `linux`, plus [appimagetool](https://github.com/AppImage/appimagetool/releases) on PATH |
+| `flatpak` | Linux | as `linux`; with `flatpak-builder` a `.flatpak` bundle, without it the manifest |
 | `web` | anywhere | nothing extra |
 
 `giode doctor` checks all of these.
@@ -154,6 +157,10 @@ timestamp = "http://timestamp.digicert.com"   # "none" to skip
 
 [linux]
 categories = ["Utility", "Office"]
+description = "Longer text for package managers and software centers."
+maintainer = "Jane Doe <jane@example.com>"   # .deb/.rpm metadata
+license = "MIT"                              # SPDX expression
+# flatpak_permissions = ["--share=ipc", "--socket=wayland", "--device=dri"]
 
 [web]
 port = 8080

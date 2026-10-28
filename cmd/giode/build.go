@@ -36,6 +36,11 @@ Builds the app in giode.toml for each target, into dist/<platform>:
 	          a Windows setup program (<App>-<version>-setup.exe) with Start
 	          menu shortcut and uninstaller, made with NSIS (from any OS)
 	linux     a Linux executable with a .desktop file and icon (Linux only)
+	deb, rpm  Debian and RPM packages installing it under /usr, with menu
+	          entry, icons and AppStream metadata (Linux only)
+	appimage  an AppImage, with appimagetool (Linux only)
+	flatpak   a Flatpak bundle with flatpak-builder, or its manifest
+	          without it (Linux only)
 	web       a WebAssembly site (dist/web)
 	desktop   this computer's platform
 	all       every target this computer can build
@@ -111,11 +116,13 @@ func cmdBuild(args []string) error {
 }
 
 // targetNames are the targets build accepts, besides desktop and all.
-var targetNames = []string{"android", "aab", "ios", "ios-sim", "macos", "windows", "windows-installer", "linux", "web"}
+var targetNames = []string{"android", "aab", "ios", "ios-sim", "macos", "windows", "windows-installer", "linux", "deb", "rpm", "appimage", "flatpak", "web"}
 
 // targetAliases are short and alternative target names.
 var targetAliases = map[string]string{
 	"apk":           "android",
+	"debian":        "deb",
+	"AppImage":      "appimage",
 	"bundle":        "aab",
 	"mac":           "macos",
 	"osx":           "macos",
@@ -189,6 +196,8 @@ func buildTarget(c *config.Config, target string, o buildOpts) (string, error) {
 		return buildLinux(c, o)
 	case "windows-installer":
 		return buildWindowsInstaller(c, o)
+	case "deb", "rpm", "appimage", "flatpak":
+		return buildLinuxPackage(c, target, o)
 	case "android", "aab", "ios", "ios-sim", "macos", "windows", "web":
 	default:
 		return "", fmt.Errorf("unknown target %q; targets: %s, desktop, all", target, strings.Join(targetNames, ", "))
