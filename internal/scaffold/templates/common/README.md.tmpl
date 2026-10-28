@@ -1,15 +1,40 @@
 # [[.Name]]
 
-A [giode](https://github.com/mehran9675/giode) app.
+[[if .Description]][[.Description]]
+
+[[end]]A [Giode](https://github.com/mehran9675/giode) app for [[.PlatformNames]].
 
 ```sh
-giode run                    # run on this computer
-giode run android            # on a connected Android device
-giode run windows            # build and run the Windows app (Wine elsewhere)
-giode build android          # dist/android/[[.Binary]].apk
+giode run                       # run on this computer
+[[- if has "android"]]
+giode run android               # on a connected Android device or emulator
+[[- end]]
+[[- if has "ios"]]
+giode run ios-sim               # in the iOS simulator (macOS)
+[[- end]]
+[[- if has "web"]]
+giode run web                   # in the browser
+[[- end]]
+giode build                     # every platform in giode.toml this computer can build
+[[- if has "windows"]]
 giode build windows-installer   # dist/windows/[[.Binary]]-<version>-setup.exe
-giode build web              # dist/web
-giode doctor                 # check the toolchains
+[[- end]]
+[[- if has "macos"]]
+giode build dmg                 # dist/macos/[[.Name]]-<version>.dmg (macOS)
+[[- end]]
+[[- if has "linux"]]
+giode build deb appimage        # Linux packages (Linux)
+[[- end]]
+[[- if has "android"]]
+giode build android aab         # APK to share, AAB for Google Play
+[[- end]]
+[[- if has "ios"]]
+giode build ios                 # .ipa for the App Store (macOS, with ios.profile)
+[[- end]]
+[[- if has "web"]]
+giode build web                 # dist/web
+[[- end]]
+giode doctor                    # check the toolchains
 ```
 
 App settings - name, ID, version, icon, permissions, signing - are in `giode.toml`.

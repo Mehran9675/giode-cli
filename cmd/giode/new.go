@@ -1,8 +1,11 @@
 package main
 
 import (
+	"strings"
+
 	"errors"
 	"fmt"
+	"github.com/mehran9675/giode-cli/internal/prompt"
 	"os"
 	"path/filepath"
 
@@ -11,15 +14,22 @@ import (
 )
 
 const newUsage = `
-Usage: giode new [options] <directory>
+Usage: giode new [options] [directory]
 
-Creates a giode project in directory: a counter app in main.go, go.mod
-with the latest giode, giode.toml with the settings to fill in, a
-placeholder icon and assets/README.md, .gitignore and a README.
+Creates a giode project: a counter app in main.go, go.mod with the latest
+giode, giode.toml set up for the platforms the app is for, a placeholder
+icon and assets/README.md, .gitignore and a README.
+
+In a terminal it asks: the folder (when not given), which platforms the
+app is for (a checklist of all of them, whether or not this computer
+builds them; move with the arrow keys, check with Space, Enter to go on),
+then the name, app ID, version, module path, publisher, description and
+website, each with a suggestion Enter takes. -y skips the questions.
 
 Example:
 
-	giode new -id com.acme.notes notes
+	giode new
+	giode new -y -platforms android,ios -id com.acme.notes notes
 	cd notes && giode run
 `
 
@@ -32,19 +42,31 @@ func cmdNew(args []string) error {
 		version  = fs.String("giode", "latest", "giode version to require")
 		offline  = fs.Bool("offline", false, "don't fetch giode; run go mod tidy yourself later")
 		noGitDir = fs.Bool("no-git", false, "don't run git init")
+		yes      = fs.Bool("y", false, "don't ask; use the flags and defaults")
+		plats    = fs.String("platforms", "", "comma separated platforms: windows,macos,linux,android,ios,web (default: all)")
+		appVer   = fs.String("version", "", "app version (default 0.1.0)")
 	)
 	fs.BoolVar(&verbose, "x", false, "print the commands run")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
 	}
-	if len(pos) != 1 {
+	if len(pos) > 1 {
 		fs.Usage()
 		return errors.New("give one directory")
 	}
-	dir := pos[0]
+	t, interactive := terminal()
+	ask := interactive && !*yes
+	if len(pos) == 0 && !ask {
+		fs.Usage()
+		return errors.New("give a directory (or run giode new in a terminal to be asked)")
+	}
+	dir := ""
+	if len(pos) == 1 {
+		dir = pos[0]
+	}
 	defName, defModule, defID := scaffold.Defaults(dir)
-	p := scaffold.Project{Dir: dir, Name: defName, Module: defModule, AppID: defID}
+	p := scaffold.Project{Dir: dir, Name: defName, Module: defModule, AppID: defID, Version: *appVer}
 	if *name != "" {
 		p.Name = *name
 	}
@@ -53,6 +75,24 @@ func cmdNew(args []string) error {
 	}
 	if *appID != "" {
 		p.AppID = *appID
+	}
+	if *plats != "" {
+		for _, s := range strings.Split(*plats, ",") {
+			s = canonicalPlatform(strings.TrimSpace(s))
+			if !validPlatform(s) {
+				return fmt.Errorf("unknown platform %q; platforms: windows, macos, linux, android, ios, web", s)
+			}
+			p.Platforms = append(p.Platforms, s)
+		}
+	}
+	if ask {
+		if p, err = wizard(t, p, dir == ""); err != nil {
+			if errors.Is(err, prompt.ErrCanceled) {
+				return errors.New("canceled; nothing was created")
+			}
+			return err
+		}
+		dir = p.Dir
 	}
 	if err := scaffold.Create(p); err != nil {
 		return err
@@ -79,8 +119,39 @@ func cmdNew(args []string) error {
 			}
 		}
 	}
-	fmt.Printf("\nNext:\n\n\tcd %s\n\tgiode run            # on this computer\n\tgiode run android    # on a connected Android device\n\nApp settings are in %s; replace the placeholders in assets/ before publishing.\n", dir, config.FileName)
+	fmt.Printf("\nNext:\n\n\tcd %s\n\tgiode run              # on this computer\n", dir)
+	if len(p.Platforms) == 0 || contains(p.Platforms, "android") {
+		fmt.Printf("\tgiode run android      # on a connected Android device\n")
+	}
+	if contains(p.Platforms, "ios") {
+		fmt.Printf("\tgiode run ios-sim      # in the iOS simulator (macOS)\n")
+	}
+	fmt.Printf("\tgiode doctor           # what this computer needs for your platforms\n\nApp settings are in %s; replace the placeholders in assets/ before publishing.\n", config.FileName)
 	return nil
+}
+
+// canonicalPlatform resolves a platform's other names.
+func canonicalPlatform(s string) string {
+	switch strings.ToLower(s) {
+	case "mac", "darwin", "osx":
+		return "macos"
+	case "win":
+		return "windows"
+	case "iphone", "ipad":
+		return "ios"
+	case "browser", "wasm", "js":
+		return "web"
+	}
+	return strings.ToLower(s)
+}
+
+func validPlatform(s string) bool {
+	for _, p := range scaffold.Platforms {
+		if p.ID == s {
+			return true
+		}
+	}
+	return false
 }
 
 const initUsage = `

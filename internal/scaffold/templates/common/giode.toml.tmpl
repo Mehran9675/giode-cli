@@ -4,38 +4,48 @@
 [app]
 name = "[[.Name]]"
 id = "[[.AppID]]"            # reverse-DNS, unique to your app; stores never let it change
-version = "0.1.0"
-build = 1                    # raise for every store upload
+version = "[[.Version]]"
+build = 1                    # raise for every store upload (giode bump)
 icon = "assets/icon.png"     # replace the placeholder (see assets/README.md)
 package = "."
-publisher = "[[.Name]]"      # TODO: your name or company, shown by installers
-description = ""             # TODO: one line about the app
-website = ""                 # TODO: https://...
+platforms = [[.PlatformList]]   # what giode build builds with no target named
+publisher = "[[.Publisher]]"[[if not .Publisher]]          # TODO: your name or company, shown by installers[[end]]
+description = "[[.Description]]"[[if not .Description]]        # TODO: one line about the app[[end]]
+website = "[[.Website]]"[[if not .Website]]            # TODO: https://...[[end]]
+[[- if has "android"]]
 
 [android]
 min_sdk = 21
 # permissions = ["network", "camera", "microphone"]
 # keep_alive = true          # lets App.KeepAlive keep work running in the background
-# gio_patches = false        # build against plain Gio (giode's patch renders at 120Hz)
 # keystore = "release.keystore"   # created by giode keystore; signs giode build -release
+[[- end]]
+[[- if has "ios"]]
 
 [ios]
 min_os = 15
-# profile = "App.mobileprovision" # for device builds
+# profile = "App.mobileprovision" # for device builds; giode run ios-sim needs none
+# team_id = "TEAMID"
 
 # Texts iOS shows when asking for permission. iOS ends an app that uses
 # the camera, microphone or speech recognition without them.
 # [ios.usage]
 # camera = "To attach photos you take."
 # microphone = "To dictate notes."
+[[- end]]
+[[- if has "macos"]]
 
 [macos]
+min_os = 11
 # identity = "Developer ID Application: Your Name (TEAMID)"  # signs giode build -release
 # notary_id = "you@example.com"     # notarizes, with the password in $GIODE_NOTARY_PASS
 # notary_team_id = "TEAMID"
+[[- end]]
+[[- if has "windows"]]
 
 [windows]
 arch = "amd64"
+# cc = "x86_64-w64-mingw32-gcc"  # only for cgo apps linking C libraries
 
 [windows.installer]
 # per_machine = true         # install for all users into Program Files (asks for admin)
@@ -45,6 +55,16 @@ arch = "amd64"
 [windows.signing]
 # certificate = "codesign.pfx"   # created by giode cert (testing) or bought; password in $GIODE_WINDOWS_CERT_PASS
 # timestamp = "http://timestamp.digicert.com"
+[[- end]]
+[[- if has "linux"]]
+
+[linux]
+categories = ["Utility"]     # freedesktop menu categories
+# license = "MIT"            # SPDX, for .deb, .rpm and AppStream
+[[- end]]
+[[- if has "web"]]
 
 [web]
 port = 8080
+# pwa = true                 # installable and offline
+[[- end]]

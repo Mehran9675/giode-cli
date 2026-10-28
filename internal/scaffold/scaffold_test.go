@@ -58,3 +58,28 @@ func TestCreate_RefusesNonEmptyDir(t *testing.T) {
 		t.Error("removed a directory it didn't create")
 	}
 }
+
+func TestCreate_Platforms(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "proj")
+	err := Create(Project{Dir: dir, Name: "Notes", Module: "example.com/notes", AppID: "com.acme.notes",
+		Platforms: []string{"android", "ios"}, Version: "1.2.0", Publisher: "Acme", Description: "Quick notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	toml, _ := os.ReadFile(filepath.Join(dir, "giode.toml"))
+	s := string(toml)
+	for _, w := range []string{`platforms = ["android", "ios"]`, `version = "1.2.0"`, `publisher = "Acme"`, "[android]", "[ios]"} {
+		if !strings.Contains(s, w) {
+			t.Errorf("giode.toml lacks %s:\n%s", w, s)
+		}
+	}
+	for _, w := range []string{"[windows]", "[macos]", "[web]", "[linux]", "TODO: your name"} {
+		if strings.Contains(s, w) {
+			t.Errorf("giode.toml has %s for a mobile-only app:\n%s", w, s)
+		}
+	}
+	readme, _ := os.ReadFile(filepath.Join(dir, "README.md"))
+	if !strings.Contains(string(readme), "for Android and iOS") || !strings.Contains(string(readme), "giode run ios-sim") || strings.Contains(string(readme), "windows-installer") {
+		t.Errorf("README:\n%s", readme)
+	}
+}
