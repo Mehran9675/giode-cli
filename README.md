@@ -164,6 +164,10 @@ license = "MIT"                              # SPDX expression
 
 [web]
 port = 8080
+pwa = true                    # installable, works offline (default)
+short_name = "Agent"          # under the home screen icon
+theme_color = "#111827"
+background_color = "#111827"
 
 # The privacy manifest (PrivacyInfo.xcprivacy) App Store apps need. giode always
 # declares the system boot time and file timestamp APIs Go itself uses.

@@ -208,6 +208,15 @@ type Linux struct {
 type Web struct {
 	// Port is where giode run web serves the app, 8080 by default.
 	Port int `toml:"port"`
+	// PWA makes the site an installable progressive web app that works
+	// offline: a manifest, icons and a service worker. True by default.
+	PWA *bool `toml:"pwa"`
+	// ShortName is the name under the home screen icon (app.name by
+	// default); ThemeColor and BackgroundColor CSS colors for the
+	// title bar and splash screen.
+	ShortName       string `toml:"short_name"`
+	ThemeColor      string `toml:"theme_color"`
+	BackgroundColor string `toml:"background_color"`
 }
 
 // Find looks for giode.toml in dir and its parents.

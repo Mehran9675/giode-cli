@@ -18,6 +18,7 @@ import (
 	"github.com/mehran9675/giode-cli/internal/giopatch"
 	"github.com/mehran9675/giode-cli/internal/gogio"
 	"github.com/mehran9675/giode-cli/internal/installer"
+	"github.com/mehran9675/giode-cli/internal/pwa"
 	"github.com/mehran9675/giode-cli/internal/sign"
 )
 
@@ -232,6 +233,15 @@ func buildTarget(c *config.Config, target string, o buildOpts) (string, error) {
 	}
 	if err := gogio.Build(pkgPath(c), g); err != nil {
 		return "", err
+	}
+	if target == "web" && (c.Web.PWA == nil || *c.Web.PWA) {
+		err := pwa.Make(pwa.App{
+			Name: c.App.Name, ShortName: c.Web.ShortName, Description: c.App.Description, ID: c.App.ID,
+			Icon: c.Path(c.App.Icon), ThemeColor: c.Web.ThemeColor, BackgroundColor: c.Web.BackgroundColor,
+		}, g.Output)
+		if err != nil {
+			return "", fmt.Errorf("making the PWA: %w", err)
+		}
 	}
 	if target == "windows" && o.release {
 		if err := signWindows(c, g.Output); err != nil {
