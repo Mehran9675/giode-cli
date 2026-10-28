@@ -15,6 +15,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -128,7 +129,7 @@ func (c *collector) visit(file string, main bool) error {
 		}
 		p := c.find(ref, name, file)
 		if p == "" {
-			if !(c.o.GOOS == "windows" && windowsRedist[strings.TrimSuffix(strings.ToLower(name), ".dll")]) {
+			if !(c.o.GOOS == "windows" && (windowsRedist[strings.TrimSuffix(strings.ToLower(name), ".dll")] || inSystem32(name))) {
 				c.missing[name] = true
 			}
 			continue
@@ -248,7 +249,14 @@ func (c *collector) find(ref, name, from string) string {
 		}
 		dirs = c.o.Search
 	case "windows":
-		dirs = append([]string{filepath.Dir(from)}, c.o.Search...)
+		dirs = c.o.Search
+		if from != c.exe {
+			// Windows looks beside a DLL for its imports. Not beside the
+			// program, though: that's the output folder, holding the
+			// last build's copies, which would win over the search
+			// folders (and be copied onto themselves).
+			dirs = append([]string{filepath.Dir(from)}, dirs...)
+		}
 	default:
 		dirs = append(append(append([]string{}, c.o.Search...), c.rpaths...), linuxDirs...)
 	}
@@ -329,9 +337,32 @@ func init() {
 		iphlpapi kernel32 kernelbase mf mfplat mfreadwrite mfuuid mmdevapi msimg32 msvcrt mswsock ncrypt
 		netapi32 normaliz ntdll ole32 oleaut32 opengl32 powrprof propsys psapi rpcrt4 secur32 setupapi
 		shcore shell32 shlwapi user32 userenv usp10 uxtheme version winhttp wininet winmm winspool ws2_32
-		wsock32 wtsapi32 xinput1_4 avrt ucrtbase dinput8 dxcore mscms`) {
+		wsock32 wtsapi32 xinput1_4 avrt ucrtbase dinput8 dxcore mscms avicap32 avifil32 wldap32
+		bcryptprimitives cryptbase cryptnet cabinet d3d10 d3d10_1 d3d10core d3d11on12 dhcpcsvc dinput
+		evr glu32 hhctrl imagehlp ksuser mfcore mpr msacm32 msvfw32 netutils nsi ntmarta oleacc pdh
+		profapi rasapi32 rstrtmgr sechost sspicli urlmon wer wevtapi windowscodecs winmmbase winsta
+		wintrust winusb wlanapi wmvcore xinput9_1_0 dbgeng fwpuclnt mfsensorgroup cryptui comsvcs
+		credui dpapi esent faultrep wkscli srvcli devobj
+		vulkan-1 opencl nvcuda`) {
+		// vulkan-1, opencl and nvcuda come with the graphics driver.
 		windowsSystem[n] = true
 	}
+}
+
+// inSystem32 reports whether name is in Windows' System32, when giode
+// runs on Windows: a DLL of Windows' the list above doesn't name.
+// It's consulted only for DLLs not found in the search folders, so a
+// library some installer dropped into System32 is still bundled when
+// the search folders have it.
+func inSystem32(name string) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	root := os.Getenv("SystemRoot")
+	if root == "" {
+		root = `C:\Windows`
+	}
+	return exists(filepath.Join(root, "System32", name))
 }
 
 // windowsRedist are Microsoft's C++ runtime DLLs: on most Windows PCs

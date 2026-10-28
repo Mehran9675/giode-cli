@@ -364,7 +364,10 @@ CPU, along with the DLLs they import. `pacman -S mingw-w64-x86_64-angleproject` 
 `mingw-w64-clang-aarch64-angleproject`) installs them.
 
 Libraries a binary imports that aren't the system's and aren't found are listed in a
-warning. `giode doctor` checks the tools: `install_name_tool` and `codesign` on macOS,
+warning; on Windows that leaves out DLLs in `System32` (when building on Windows) and the
+graphics driver's (`vulkan-1.dll`, `OpenCL.dll`). A program's own folder - the output
+folder, with the last build's copies - isn't searched for its DLLs, so a rebuild takes
+them from the search folders again. `giode doctor` checks the tools: `install_name_tool` and `codesign` on macOS,
 `windows.cc` and pkg-config for Windows cgo builds.
 
 ## File associations
