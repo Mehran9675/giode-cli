@@ -32,11 +32,68 @@ type Project struct {
 	Module string
 	// AppID is the reverse-DNS app ID.
 	AppID string
+	// Platforms are the platforms the app is for (see Platforms); all
+	// when empty.
+	Platforms []string
+	// Version is major.minor.patch, 0.1.0 by default. Publisher,
+	// Description and Website fill in giode.toml.
+	Version, Publisher, Description, Website string
+}
+
+// Platform is a platform a project can target.
+type Platform struct {
+	// ID is its name in giode.toml's app.platforms; Name its display
+	// name.
+	ID, Name string
+	// BuildsOn are the host GOOSes that can build it (empty: any).
+	BuildsOn []string
+	// Needs says what building it takes.
+	Needs string
+}
+
+// Platforms are the platforms giode builds for.
+var Platforms = []Platform{
+	{ID: "windows", Name: "Windows", Needs: "builds anywhere; NSIS for the setup program"},
+	{ID: "macos", Name: "macOS", BuildsOn: []string{"darwin"}, Needs: "builds on a Mac with Xcode"},
+	{ID: "linux", Name: "Linux", BuildsOn: []string{"linux"}, Needs: "builds on Linux"},
+	{ID: "android", Name: "Android", Needs: "needs the Android SDK and NDK"},
+	{ID: "ios", Name: "iOS", BuildsOn: []string{"darwin"}, Needs: "builds on a Mac with Xcode"},
+	{ID: "web", Name: "Web", Needs: "builds anywhere (WebAssembly)"},
 }
 
 // data is what the templates see.
 type data struct {
-	Name, Module, AppID, Binary string
+	Name, Module, AppID, Binary              string
+	Version, Publisher, Description, Website string
+	platforms                                []string
+}
+
+// PlatformList is the platforms as a TOML array.
+func (d data) PlatformList() string {
+	q := make([]string, len(d.platforms))
+	for i, p := range d.platforms {
+		q[i] = fmt.Sprintf("%q", p)
+	}
+	return "[" + strings.Join(q, ", ") + "]"
+}
+
+// PlatformNames is the platforms' names in prose.
+func (d data) PlatformNames() string {
+	var names []string
+	for _, p := range Platforms {
+		for _, id := range d.platforms {
+			if id == p.ID {
+				names = append(names, p.Name)
+			}
+		}
+	}
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // Create writes the project's files: main.go, giode.toml, an icon,
@@ -62,7 +119,24 @@ func Create(p Project) error {
 }
 
 func create(p Project) error {
-	d := data{Name: p.Name, Module: p.Module, AppID: p.AppID, Binary: path.Base(p.Module)}
+	d := data{Name: p.Name, Module: p.Module, AppID: p.AppID, Binary: path.Base(p.Module),
+		Version: p.Version, Publisher: p.Publisher, Description: p.Description, Website: p.Website, platforms: p.Platforms}
+	if d.Version == "" {
+		d.Version = "0.1.0"
+	}
+	if len(d.platforms) == 0 {
+		for _, pl := range Platforms {
+			d.platforms = append(d.platforms, pl.ID)
+		}
+	}
+	has := func(id string) bool {
+		for _, p := range d.platforms {
+			if p == id {
+				return true
+			}
+		}
+		return false
+	}
 	files := map[string]string{
 		"main.go":          "templates/app/main.go.tmpl",
 		"assets/README.md": "templates/common/assets-README.md.tmpl",
@@ -72,7 +146,7 @@ func create(p Project) error {
 	}
 	for dst, src := range files {
 		// [[ ]] delimiters, since Go code is full of {{ }}.
-		t, err := template.New(path.Base(src)).Delims("[[", "]]").ParseFS(templates, src)
+		t, err := template.New(path.Base(src)).Delims("[[", "]]").Funcs(template.FuncMap{"has": has}).ParseFS(templates, src)
 		if err != nil {
 			return err
 		}

@@ -5,8 +5,8 @@ project, run it on your computer, a phone, a simulator or the browser, and build
 packages and installers for Android, iOS, macOS, Windows, Linux and the web.
 
 ```sh
-giode new counter          # a new app with the latest giode
-cd counter
+giode new                  # asks for the platforms, name, ID and version, then creates the app
+cd my-app                   # the folder you named
 giode run                  # on this computer
 giode run android          # on a connected phone: build, install, launch, follow the log
 giode run windows          # build the Windows app and run it (with Wine off Windows)
@@ -50,7 +50,8 @@ target needs.
 
 | Command | What it does |
 | --- | --- |
-| `giode new [-id com.example.app] <dir>` | Creates a project: a counter app in `main.go`, `go.mod` with the latest giode, `giode.toml` with the settings to fill in, placeholder assets (`assets/icon.png`, `assets/README.md`), `.gitignore` and a README. |
+| `giode new [dir]` | Creates a project: a counter app in `main.go`, `go.mod` with the latest giode, `giode.toml` set up for the chosen platforms, placeholder assets (`assets/icon.png`, `assets/README.md`), `.gitignore` and a README. In a terminal it asks first: a checklist of every platform (Windows, macOS, Linux, Android, iOS, Web - whether or not this computer builds them; arrow keys move, Space checks, Enter goes on), then the name, app ID, version, module path, publisher, description and website, each with a suggestion Enter takes. `-y` skips the questions; `-platforms android,ios`, `-id`, `-name` and `-version` answer them. |
+| `giode build` (no target) | Builds the platforms in `app.platforms` that this computer can, saying which it skips. |
 | `giode init` | Adds `giode.toml` to an existing Go module. |
 | `giode build <target>...` | Builds into `dist/<platform>`. Targets: `android` (APK), `aab` (Play bundle), `ios` (IPA), `ios-sim`, `macos` (universal), `dmg`, `windows`, `windows-installer` (setup program), `msix`, `winget`, `linux`, `deb`, `rpm`, `appimage`, `flatpak`, `web`, `desktop` (this computer) and `all` (everything this computer can build). `-release` signs with your certificates. |
 | `giode run [target]` | Builds for a target and runs it: `desktop` (default, with `go run`), `linux`, `windows` (Wine off Windows), `windows-installer`, `macos`, `android` (builds the device's architecture, installs, launches, follows the log), `ios-sim`, `web` (serves `dist/web`). `-mcp` starts giode's MCP server so an AI agent can drive the app. |

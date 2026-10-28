@@ -97,6 +97,10 @@ type App struct {
 	Licenses string `toml:"licenses"`
 	// Output is where builds go, "dist" by default.
 	Output string `toml:"output"`
+	// Platforms are the platforms the app is for: windows, macos,
+	// linux, android, ios, web. giode build with no target builds the
+	// ones this computer can.
+	Platforms []string `toml:"platforms"`
 }
 
 // Android configures Android builds.
@@ -470,6 +474,13 @@ func (c *Config) Validate() error {
 			errs = append(errs, err)
 		}
 	}
+	for _, p := range c.App.Platforms {
+		switch p {
+		case "windows", "macos", "linux", "android", "ios", "web":
+		default:
+			errs = append(errs, fmt.Errorf("app.platforms: unknown platform %q (windows, macos, linux, android, ios, web)", p))
+		}
+	}
 	if r := c.App.Renderer; r != "" && r != "opengl" {
 		errs = append(errs, fmt.Errorf("app.renderer is %q; the only choice is opengl (leave it out for Gio's default)", r))
 	}
@@ -630,4 +641,20 @@ func (c *Config) NativeOptions(goos string) (search, libs, exclude []string) {
 		libs = append(libs, c.Path(l))
 	}
 	return search, libs, append(append([]string{}, c.Native.Exclude...), p.Exclude...)
+}
+
+// CheckAppID reports whether id is a valid reverse-DNS app ID.
+func CheckAppID(id string) error {
+	if !appIDRE.MatchString(id) {
+		return fmt.Errorf("an app ID is reverse-DNS, like com.example.notes: letters, digits and _, at least two parts")
+	}
+	return nil
+}
+
+// CheckVersion reports whether v is major.minor.patch.
+func CheckVersion(v string) error {
+	if !versionRE.MatchString(v) {
+		return fmt.Errorf("a version is major.minor.patch, like 1.0.0")
+	}
+	return nil
 }
