@@ -166,7 +166,7 @@ func cmdRelease(args []string) error {
 			}
 			platform, kind, name = "windows-"+arch, "exe", fmt.Sprintf("%s-%s-windows-%s.exe", binaryName(c), c.App.Version, arch)
 			if t == "windows-installer" {
-				kind, name = "installer", fmt.Sprintf("%s-%s-setup.exe", binaryName(c), c.App.Version)
+				kind, name = "installer", fmt.Sprintf("%s-%s-%s-setup.exe", binaryName(c), c.App.Version, arch)
 			}
 		case "macos":
 			platform, kind, name = "darwin-universal", "app.zip", fmt.Sprintf("%s-%s-macos.zip", binaryName(c), c.App.Version)

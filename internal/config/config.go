@@ -80,7 +80,11 @@ type App struct {
 	Publisher   string `toml:"publisher"`
 	Description string `toml:"description"`
 	Website     string `toml:"website"`
-	// Tags are Go build tags; Ldflags extra linker flags.
+	// Tags are Go build tags; Ldflags extra linker flags, in which
+	// {version}, {build} and {id} become app.version (the release tag
+	// with $GIODE_VERSION), app.build and app.id:
+	// "-X main.version={version}". Every build also sets
+	// giode.AppVersion and giode.AppBuild.
 	Tags    string `toml:"tags"`
 	Ldflags string `toml:"ldflags"`
 	// Renderer "opengl" builds macOS and iOS apps with Gio's OpenGL
@@ -484,6 +488,11 @@ func (c *Config) Validate() error {
 	if r := c.App.Renderer; r != "" && r != "opengl" {
 		errs = append(errs, fmt.Errorf("app.renderer is %q; the only choice is opengl (leave it out for Gio's default)", r))
 	}
+	for _, a := range c.CI.Arch {
+		if a != "amd64" && a != "arm64" {
+			errs = append(errs, fmt.Errorf("ci.arch: %q; giode ci builds amd64 and arm64", a))
+		}
+	}
 	for k, v := range map[string]string{"ios.push": c.IOS.Push, "macos.push": c.MacOS.Push} {
 		if v != "" && v != "development" && v != "production" {
 			errs = append(errs, fmt.Errorf("%s is %q; use development or production", k, v))
@@ -610,9 +619,14 @@ type CI struct {
 	// windows_msys2 is set) - installing the C libraries a cgo app
 	// links: "brew install mpv".
 	Setup CISetup `toml:"setup"`
-	// WindowsMSYS2 sets up MSYS2 on the Windows runner, with its
-	// MINGW64 toolchain, for cgo apps.
+	// WindowsMSYS2 builds Windows on Windows runners in MSYS2, for cgo
+	// apps: MINGW64 for amd64, CLANGARM64 for arm64 (its packages are
+	// ${MINGW_PACKAGE_PREFIX}-name in setup commands).
 	WindowsMSYS2 bool `toml:"windows_msys2"`
+	// Arch are the CPUs to build Linux and Windows packages for: amd64
+	// (the default) and arm64, on GitHub's ARM runners. macOS builds are
+	// universal.
+	Arch []string `toml:"arch"`
 }
 
 // CISetup holds setup commands by runner OS.
@@ -623,8 +637,12 @@ type CISetup struct {
 }
 
 // NativeOptions returns the library search settings for a platform:
-// windows, darwin or linux.
-func (c *Config) NativeOptions(goos string) (search, libs, exclude []string) {
+// windows, darwin or linux. Paths may use environment variables
+// ($MSYSTEM_PREFIX/bin, ${HOMEBREW_PREFIX}/lib, %LOCALAPPDATA% on
+// Windows) and globs (/opt/*/lib/libEGL.dll); a library pattern
+// matching nothing is an error, a search directory matching nothing is
+// skipped.
+func (c *Config) NativeOptions(goos string) (search, libs, exclude []string, err error) {
 	var p NativePlatform
 	switch goos {
 	case "windows":
@@ -635,12 +653,48 @@ func (c *Config) NativeOptions(goos string) (search, libs, exclude []string) {
 		p = c.Native.Linux.NativePlatform
 	}
 	for _, s := range p.Search {
-		search = append(search, c.Path(s))
+		for _, m := range c.expandPath(s) {
+			if info, err := os.Stat(m); err == nil && info.IsDir() {
+				search = append(search, m)
+			}
+		}
 	}
 	for _, l := range p.Libraries {
-		libs = append(libs, c.Path(l))
+		ms := c.expandPath(l)
+		var found []string
+		for _, m := range ms {
+			if info, err := os.Stat(m); err == nil && !info.IsDir() {
+				found = append(found, m)
+			}
+		}
+		if len(found) == 0 {
+			return nil, nil, nil, fmt.Errorf("native library %q: no such file (expanded to %s)", l, strings.Join(ms, ", "))
+		}
+		libs = append(libs, found...)
 	}
-	return search, libs, append(append([]string{}, c.Native.Exclude...), p.Exclude...)
+	return search, libs, append(append([]string{}, c.Native.Exclude...), p.Exclude...), nil
+}
+
+var winEnvRE = regexp.MustCompile(`%([A-Za-z_][A-Za-z0-9_()]*)%`)
+
+// expandPath expands environment variables and globs in a path from
+// giode.toml, resolved against its directory, and returns the matches
+// (the path itself when it has no glob).
+func (c *Config) expandPath(p string) []string {
+	p = winEnvRE.ReplaceAllStringFunc(p, func(m string) string { return os.Getenv(m[1 : len(m)-1]) })
+	p = os.ExpandEnv(p)
+	if strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			p = filepath.Join(home, p[2:])
+		}
+	}
+	p = c.Path(filepath.FromSlash(p))
+	if strings.ContainsAny(p, "*?[") {
+		ms, _ := filepath.Glob(p)
+		sort.Strings(ms)
+		return ms
+	}
+	return []string{p}
 }
 
 // CheckAppID reports whether id is a valid reverse-DNS app ID.

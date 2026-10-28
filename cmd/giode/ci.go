@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"text/template"
 
 	"github.com/mehran9675/giode-cli/internal/config"
 )
@@ -119,7 +120,9 @@ the Windows packages on a Windows runner with MSYS2's MINGW64 toolchain:
 	[ci.setup]
 	macos = "brew install mpv"
 	linux = "sudo apt-get install -y libmpv-dev"
-	windows = "pacman -S --noconfirm mingw-w64-x86_64-mpv"
+	windows = "pacman -S --noconfirm ${MINGW_PACKAGE_PREFIX}-mpv"
+	arch = ["amd64", "arm64"]       # builds per CPU: Linux on ubuntu-24.04-arm,
+	                               # Windows on windows-11-arm (CLANGARM64)
 
 Secrets it uses when set (Settings > Secrets and variables > Actions):
 
@@ -155,83 +158,79 @@ func cmdCI(args []string) error {
 	return nil
 }
 
-// workflow returns the release workflow for the project: with its
-// [ci] setup commands, and the Windows build on a Windows runner with
-// MSYS2 when ci.windows_msys2 is set (cgo apps linking C libraries).
+// workflow returns the release workflow for the project.
 func workflow(c *config.Config) string {
-	step := func(cmds string, indent string) string {
-		if strings.TrimSpace(cmds) == "" {
-			return ""
-		}
-		var b strings.Builder
-		b.WriteString(indent + "- name: Project setup (giode.toml ci.setup)\n" + indent + "  run: |\n")
-		for _, l := range strings.Split(strings.TrimRight(cmds, "\n"), "\n") {
-			b.WriteString(indent + "    " + l + "\n")
-		}
-		return b.String()
+	var b strings.Builder
+	if err := workflowTemplate.Execute(&b, newCIData(c)); err != nil {
+		panic(err) // the template is fixed; tests run it
 	}
-	linuxWindows := "          # Signed when the repository has the certificate or keystore.\n" +
-		"          win=\"\"; if [ -n \"$GIODE_WINDOWS_CERT_PASS\" ]; then win=\"-release\"; fi\n" +
-		"          giode build $win windows-installer msix\n"
-	windowsPaths := "            dist/windows/*.exe\n            dist/windows/*.msix\n"
-	windowsJob, needs := "", "linux, macos"
-	if c.CI.WindowsMSYS2 {
-		linuxWindows, windowsPaths, needs = "", "", "linux, macos, windows"
-		windowsJob = strings.NewReplacer("{{SETUP}}", step(c.CI.Setup.Windows, "      "),
-			"{{CERT}}", orDefault(c.Windows.Signing.Certificate, "codesign.pfx")).Replace(windowsMSYS2Job)
-	}
-	return strings.NewReplacer(
-		"{{KEYSTORE}}", orDefault(c.Android.Keystore, "release.keystore"),
-		"{{CERT}}", orDefault(c.Windows.Signing.Certificate, "codesign.pfx"),
-		"{{LINUX_SETUP}}\n", step(c.CI.Setup.Linux, "      "),
-		"{{MACOS_SETUP}}\n", step(c.CI.Setup.MacOS, "      "),
-		"{{LINUX_WINDOWS}}\n", linuxWindows,
-		"{{WINDOWS_PATHS}}\n", windowsPaths,
-		"{{WINDOWS_JOB}}\n", windowsJob,
-		"{{NEEDS}}", needs,
-	).Replace(releaseWorkflow)
+	return b.String()
 }
 
-// windowsMSYS2Job builds the Windows packages on a Windows runner, in
-// MSYS2's MINGW64 environment, for cgo apps.
-const windowsMSYS2Job = `  windows:
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: msys2 {0}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: stable
-      - uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          path-type: inherit
-          install: >-
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-pkgconf
-            mingw-w64-x86_64-nsis
-      - run: go install github.com/mehran9675/giode-cli/cmd/giode@latest
-{{SETUP}}      - name: Signing certificate
-        env:
-          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
-        run: |
-          if [ -n "$WINDOWS_CERT_BASE64" ]; then echo "$WINDOWS_CERT_BASE64" | base64 -d > {{CERT}}; fi
-      - name: Build
-        env:
-          GIODE_WINDOWS_CERT_PASS: ${{ secrets.GIODE_WINDOWS_CERT_PASS }}
-        run: |
-          win=""; if [ -n "$GIODE_WINDOWS_CERT_PASS" ]; then win="-release"; fi
-          "$(go env GOPATH)/bin/giode" build $win windows-installer msix
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows
-          path: |
-            dist/windows/*.exe
-            dist/windows/*.msix
+// ciRunner is one architecture's runner for a job.
+type ciRunner struct {
+	Arch, Runner string
+	// Primary builds the targets made once per release (web, Android,
+	// Windows when cross-built).
+	Primary bool
+	// MSYS2 environment, its compiler, and NSIS from MSYS2 or Chocolatey.
+	MSYSTEM, CC string
+	ChocoNSIS   bool
+}
 
-`
+type ciData struct {
+	Keystore, Cert                 string
+	Linux, Windows                 []ciRunner
+	CrossWindows                   []string
+	WindowsMSYS2                   bool
+	SetupLinux, SetupMac, SetupWin string
+	Needs                          string
+}
+
+func newCIData(c *config.Config) ciData {
+	archs := c.CI.Arch
+	if len(archs) == 0 {
+		archs = []string{"amd64"}
+	}
+	d := ciData{
+		Keystore:     orDefault(c.Android.Keystore, "release.keystore"),
+		Cert:         orDefault(c.Windows.Signing.Certificate, "codesign.pfx"),
+		WindowsMSYS2: c.CI.WindowsMSYS2,
+		SetupLinux:   setupIndent(c.CI.Setup.Linux, "          "),
+		SetupMac:     setupIndent(c.CI.Setup.MacOS, "          "),
+		SetupWin:     setupIndent(c.CI.Setup.Windows, "          "),
+	}
+	for i, a := range archs {
+		runner := "ubuntu-latest"
+		if a == "arm64" {
+			runner = "ubuntu-24.04-arm"
+		}
+		d.Linux = append(d.Linux, ciRunner{Arch: a, Runner: runner, Primary: i == 0})
+		if c.CI.WindowsMSYS2 {
+			w := ciRunner{Arch: a, Runner: "windows-latest", MSYSTEM: "MINGW64", CC: "gcc"}
+			if a == "arm64" {
+				w = ciRunner{Arch: a, Runner: "windows-11-arm", MSYSTEM: "CLANGARM64", CC: "clang", ChocoNSIS: true}
+			}
+			d.Windows = append(d.Windows, w)
+		} else {
+			d.CrossWindows = append(d.CrossWindows, a)
+		}
+	}
+	d.Needs = "linux, macos"
+	if c.CI.WindowsMSYS2 {
+		d.Needs += ", windows"
+	}
+	return d
+}
+
+// setupIndent indents setup commands for a run block; empty stays empty.
+func setupIndent(cmds, prefix string) string {
+	cmds = strings.TrimRight(cmds, "\n")
+	if strings.TrimSpace(cmds) == "" {
+		return ""
+	}
+	return prefix + strings.ReplaceAll(cmds, "\n", "\n"+prefix)
+}
 
 func orDefault(s, d string) string {
 	if s == "" {
@@ -239,6 +238,8 @@ func orDefault(s, d string) string {
 	}
 	return s
 }
+
+var workflowTemplate = template.Must(template.New("release").Delims("[[", "]]").Parse(releaseWorkflow))
 
 // releaseWorkflow is the GitHub Actions workflow giode ci writes.
 const releaseWorkflow = `# Written by giode ci. Builds and publishes a release when a version tag is pushed.
@@ -258,7 +259,13 @@ env:
 
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:[[range .Linux]]
+          - arch: [[.Arch]]
+            runner: [[.Runner]]
+            primary: [[.Primary]][[end]]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -269,30 +276,45 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev libffi-dev libxcursor-dev libvulkan-dev nsis osslsigncode
           go install github.com/mehran9675/giode-cli/cmd/giode@latest
-{{LINUX_SETUP}}
+[[- if .SetupLinux]]
+      - name: Project setup (giode.toml ci.setup)
+        run: |
+[[.SetupLinux]]
+[[- end]]
       - name: Signing keys
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
         run: |
-          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > {{KEYSTORE}}; fi
-          if [ -n "$WINDOWS_CERT_BASE64" ]; then echo "$WINDOWS_CERT_BASE64" | base64 -d > {{CERT}}; fi
-      - name: Build
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > [[.Keystore]]; fi
+          if [ -n "$WINDOWS_CERT_BASE64" ]; then echo "$WINDOWS_CERT_BASE64" | base64 -d > [[.Cert]]; fi
+      - name: Build Linux packages
+        run: giode build deb rpm
+      - name: Build web, Windows and Android
+        if: matrix.primary
         env:
           GIODE_KEYSTORE_PASS: ${{ secrets.GIODE_KEYSTORE_PASS }}
           GIODE_WINDOWS_CERT_PASS: ${{ secrets.GIODE_WINDOWS_CERT_PASS }}
         run: |
-          giode build deb rpm web
-{{LINUX_WINDOWS}}
+          giode build web
+[[- if .CrossWindows]]
+          # Signed when the repository has the certificate or keystore.
+          win=""; if [ -n "$GIODE_WINDOWS_CERT_PASS" ]; then win="-release"; fi
+[[- range .CrossWindows]]
+          giode build $win -arch [[.]] windows-installer msix
+[[- end]]
+[[- end]]
           apk=""; if [ -n "$GIODE_KEYSTORE_PASS" ]; then apk="-release"; fi
           giode build $apk android aab
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-windows-android
+          name: linux-${{ matrix.arch }}
+          if-no-files-found: ignore
           path: |
             dist/linux/*.deb
             dist/linux/*.rpm
-{{WINDOWS_PATHS}}
+            dist/windows/*.exe
+            dist/windows/*.msix
             dist/android/*.apk
             dist/android/*.aab
             dist/android/native-debug-symbols.zip
@@ -307,7 +329,11 @@ jobs:
         with:
           go-version: stable
       - run: go install github.com/mehran9675/giode-cli/cmd/giode@latest
-{{MACOS_SETUP}}
+[[- if .SetupMac]]
+      - name: Project setup (giode.toml ci.setup)
+        run: |
+[[.SetupMac]]
+[[- end]]
       - name: Signing certificate
         if: env.MACOS_CERT_BASE64 != ''
         env:
@@ -331,10 +357,67 @@ jobs:
         with:
           name: macos
           path: dist/macos/*.dmg
+[[- if .WindowsMSYS2]]
 
-{{WINDOWS_JOB}}
+  windows:
+    strategy:
+      matrix:
+        include:[[range .Windows]]
+          - arch: [[.Arch]]
+            runner: [[.Runner]]
+            msystem: [[.MSYSTEM]]
+            cc: [[.CC]]
+            choco_nsis: [[.ChocoNSIS]][[end]]
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      CC: ${{ matrix.cc }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          path-type: inherit
+          pacboy: >-
+            toolchain:p
+            pkgconf:p
+      - name: NSIS
+        shell: pwsh
+        run: |
+          if ("${{ matrix.choco_nsis }}" -eq "true") { choco install nsis -y; "C:\Program Files (x86)\NSIS" | Out-File -Append $env:GITHUB_PATH }
+          else { C:\msys64\usr\bin\pacman.exe -S --noconfirm mingw-w64-x86_64-nsis }
+      - run: go install github.com/mehran9675/giode-cli/cmd/giode@latest
+[[- if .SetupWin]]
+      - name: Project setup (giode.toml ci.setup; $MINGW_PACKAGE_PREFIX names this runner's packages)
+        run: |
+[[.SetupWin]]
+[[- end]]
+      - name: Signing certificate
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+        run: |
+          if [ -n "$WINDOWS_CERT_BASE64" ]; then echo "$WINDOWS_CERT_BASE64" | base64 -d > [[.Cert]]; fi
+      - name: Build
+        env:
+          GIODE_WINDOWS_CERT_PASS: ${{ secrets.GIODE_WINDOWS_CERT_PASS }}
+        run: |
+          win=""; if [ -n "$GIODE_WINDOWS_CERT_PASS" ]; then win="-release"; fi
+          "$(go env GOPATH)/bin/giode" build $win -arch ${{ matrix.arch }} windows-installer msix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}
+          path: |
+            dist/windows/*.exe
+            dist/windows/*.msix
+[[- end]]
+
   publish:
-    needs: [{{NEEDS}}]
+    needs: [[printf "[%s]" .Needs]]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:

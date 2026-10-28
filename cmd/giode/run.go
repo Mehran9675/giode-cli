@@ -74,7 +74,7 @@ func cmdRun(args []string) error {
 			return err
 		}
 		defer gb.cleanup()
-		args := append(append([]string{"run"}, gb.goArgs()...), pkgPath(c))
+		args := append(append([]string{"run", "-ldflags", desktopLdflags(c, hostTarget())}, gb.goArgs()...), pkgPath(c))
 		return run(command(c, "go", append(args, appArgs...)...))
 	case "linux":
 		if runtime.GOOS != "linux" {

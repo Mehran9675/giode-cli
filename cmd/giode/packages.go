@@ -126,13 +126,7 @@ func buildMSIX(c *config.Config, o buildOpts) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	arch := o.arch
-	if arch == "" {
-		arch = c.Windows.Arch
-	}
-	if arch == "" {
-		arch = "amd64"
-	}
+	arch := windowsArch(c, o)
 	out := filepath.Join(filepath.Dir(exe), fmt.Sprintf("%s-%s-%s.msix", binaryName(c), c.App.Version, arch))
 	if o.output != "" {
 		out, _ = filepath.Abs(o.output)
@@ -228,7 +222,7 @@ func buildDMG(c *config.Config, o buildOpts) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	out := filepath.Join(filepath.Dir(app), fmt.Sprintf("%s-%s.dmg", binaryName(c), c.App.Version))
+	out := filepath.Join(filepath.Dir(app), fmt.Sprintf("%s-%s-%s.dmg", binaryName(c), c.App.Version, macArch(o)))
 	if o.output != "" {
 		out, _ = filepath.Abs(o.output)
 	}
@@ -265,4 +259,25 @@ func buildDMG(c *config.Config, o buildOpts) (string, error) {
 		}
 	}
 	return out, nil
+}
+
+// windowsArch is the CPU a Windows build is for: -arch, windows.arch,
+// or amd64.
+func windowsArch(c *config.Config, o buildOpts) string {
+	if o.arch != "" {
+		return o.arch
+	}
+	if c.Windows.Arch != "" {
+		return c.Windows.Arch
+	}
+	return "amd64"
+}
+
+// macArch names the CPUs of a macOS build: universal (the default, for
+// Apple silicon and Intel) or the -arch list.
+func macArch(o buildOpts) string {
+	if o.arch == "" || strings.Contains(o.arch, ",") {
+		return "universal"
+	}
+	return o.arch
 }
