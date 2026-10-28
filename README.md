@@ -52,7 +52,7 @@ target needs.
 | --- | --- |
 | `giode new [-id com.example.app] <dir>` | Creates a project: a counter app in `main.go`, `go.mod` with the latest giode, `giode.toml` with the settings to fill in, placeholder assets (`assets/icon.png`, `assets/README.md`), `.gitignore` and a README. |
 | `giode init` | Adds `giode.toml` to an existing Go module. |
-| `giode build <target>...` | Builds into `dist/<platform>`. Targets: `android` (APK), `aab` (Play bundle), `ios` (IPA), `ios-sim`, `macos`, `windows`, `windows-installer` (setup program), `msix`, `winget`, `linux`, `deb`, `rpm`, `appimage`, `flatpak`, `web`, `desktop` (this computer) and `all` (everything this computer can build). `-release` signs with your certificates. |
+| `giode build <target>...` | Builds into `dist/<platform>`. Targets: `android` (APK), `aab` (Play bundle), `ios` (IPA), `ios-sim`, `macos` (universal), `dmg`, `windows`, `windows-installer` (setup program), `msix`, `winget`, `linux`, `deb`, `rpm`, `appimage`, `flatpak`, `web`, `desktop` (this computer) and `all` (everything this computer can build). `-release` signs with your certificates. |
 | `giode run [target]` | Builds for a target and runs it: `desktop` (default, with `go run`), `linux`, `windows` (Wine off Windows), `windows-installer`, `macos`, `android` (builds the device's architecture, installs, launches, follows the log), `ios-sim`, `web` (serves `dist/web`). `-mcp` starts giode's MCP server so an AI agent can drive the app. |
 | `giode devices` | Lists Android devices and booted iOS simulators. |
 | `giode doctor` | Checks Go, the Android SDK, build tools, platform, NDK and JDK, Xcode, and Gio's Linux libraries, with install commands for what's missing. |
@@ -73,7 +73,7 @@ to print what they run. Targets have short names too: `apk`, `bundle`, `win`, `m
 | Target | Builds on | Needs |
 | --- | --- | --- |
 | `android`, `aab` | Linux, macOS, Windows | Android SDK with build tools, a platform and the NDK; a JDK |
-| `ios`, `ios-sim`, `macos` | macOS | Xcode; for `ios`, a provisioning profile |
+| `ios`, `ios-sim`, `macos`, `dmg` | macOS | Xcode; for `ios`, a provisioning profile |
 | `windows` | Linux, macOS, Windows | nothing extra: Gio doesn't need cgo on Windows |
 | `msix`, `winget` | Linux, macOS, Windows | nothing extra for `msix` (giode writes it); `winget` builds the setup program, so NSIS |
 | `windows-installer` | Linux, macOS, Windows | [NSIS](https://nsis.sourceforge.io) (`winget install NSIS.NSIS`, `brew install makensis`, `apt install nsis`) |

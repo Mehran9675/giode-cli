@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -183,4 +184,55 @@ func wingetName(s string) string {
 		return "App"
 	}
 	return b.String()
+}
+
+// buildDMG builds the macOS app and puts it in a disk image with a link
+// to Applications, signed and notarized like the app under -release.
+func buildDMG(c *config.Config, o buildOpts) (string, error) {
+	if runtime.GOOS != "darwin" {
+		return "", fmt.Errorf("disk images need macOS (hdiutil)")
+	}
+	appOpts := o
+	appOpts.output = ""
+	app, err := buildTarget(c, "macos", appOpts)
+	if err != nil {
+		return "", err
+	}
+	out := filepath.Join(filepath.Dir(app), fmt.Sprintf("%s-%s.dmg", binaryName(c), c.App.Version))
+	if o.output != "" {
+		out, _ = filepath.Abs(o.output)
+	}
+	stage, err := os.MkdirTemp("", "giode-dmg-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(stage)
+	if err := run(exec.Command("ditto", app, filepath.Join(stage, filepath.Base(app)))); err != nil {
+		return "", err
+	}
+	if err := os.Symlink("/Applications", filepath.Join(stage, "Applications")); err != nil {
+		return "", err
+	}
+	os.Remove(out)
+	if err := run(exec.Command("hdiutil", "create", "-volname", c.App.Name, "-srcfolder", stage, "-ov", "-format", "UDZO", out)); err != nil {
+		return "", err
+	}
+	if o.release && c.MacOS.Identity != "" {
+		if err := run(exec.Command("codesign", "--force", "--sign", c.MacOS.Identity, out)); err != nil {
+			return "", err
+		}
+		if c.MacOS.NotaryID != "" {
+			args := []string{"notarytool", "submit", out, "--apple-id", c.MacOS.NotaryID, "--team-id", c.MacOS.NotaryTeamID, "--wait"}
+			if pass := os.Getenv(c.MacOS.NotaryPassEnv); pass != "" {
+				args = append(args, "--password", pass)
+			}
+			if err := run(exec.Command("xcrun", args...)); err != nil {
+				return "", err
+			}
+			if err := run(exec.Command("xcrun", "stapler", "staple", out)); err != nil {
+				return "", err
+			}
+		}
+	}
+	return out, nil
 }

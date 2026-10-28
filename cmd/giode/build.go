@@ -31,7 +31,8 @@ Builds the app in giode.toml for each target, into dist/<platform>:
 	aab       an Android App Bundle for Google Play (dist/android/<App>.aab)
 	ios       an IPA for devices, signed with ios.profile (macOS only)
 	ios-sim   an app for the iOS simulator (macOS only)
-	macos     a macOS app bundle (macOS only)
+	macos     a universal (Apple silicon and Intel) macOS app bundle (macOS only)
+	dmg       the app in a disk image with a link to Applications (macOS only)
 	windows   a Windows executable with icon and manifest (from any OS)
 	windows-installer
 	          a Windows setup program (<App>-<version>-setup.exe) with Start
@@ -120,7 +121,7 @@ func cmdBuild(args []string) error {
 }
 
 // targetNames are the targets build accepts, besides desktop and all.
-var targetNames = []string{"android", "aab", "ios", "ios-sim", "macos", "windows", "windows-installer", "msix", "winget", "linux", "deb", "rpm", "appimage", "flatpak", "web"}
+var targetNames = []string{"android", "aab", "ios", "ios-sim", "macos", "dmg", "windows", "windows-installer", "msix", "winget", "linux", "deb", "rpm", "appimage", "flatpak", "web"}
 
 // targetAliases are short and alternative target names.
 var targetAliases = map[string]string{
@@ -204,6 +205,8 @@ func buildTarget(c *config.Config, target string, o buildOpts) (string, error) {
 		return buildLinuxPackage(c, target, o)
 	case "msix":
 		return buildMSIX(c, o)
+	case "dmg":
+		return buildDMG(c, o)
 	case "winget":
 		return buildWinget(c, o)
 	case "android", "aab", "ios", "ios-sim", "macos", "windows", "web":
