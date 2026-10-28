@@ -89,6 +89,9 @@ type Options struct {
 	Args []string
 	// Extras adds what gogio's templates can't express.
 	Extras Extras
+	// SymbolsDir, when set, receives the unstripped native libraries of
+	// Android builds, by ABI, for the Play Console's crash reports.
+	SymbolsDir string
 	// ModFile, when set, is passed as -modfile to the go build and go
 	// list commands run in the app's module - and only to those, since
 	// go refuses the flag outside module mode.
@@ -142,8 +145,8 @@ func Build(pkg string, o Options) error {
 	*notaryID, *notaryPass, *notaryTeamID = o.NotaryID, o.NotaryPass, o.NotaryTeamID
 	*schemes, *pkgQueries = strings.Join(o.Schemes, ","), strings.Join(o.Queries, ",")
 	appArgs, extras = o.Args, o.Extras
-	modFile = o.ModFile
-	defer func() { modFile = "" }()
+	modFile, symbolsDir = o.ModFile, o.SymbolsDir
+	defer func() { modFile, symbolsDir = "", "" }()
 	if *buildMode == "" {
 		*buildMode = "exe"
 	}

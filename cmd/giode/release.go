@@ -328,3 +328,34 @@ func zipApp(app, dst string) error {
 	}
 	return zw.Close()
 }
+
+// zipTree zips the files under root, named relative to it.
+func zipTree(root, dst string) error {
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	zw := zip.NewWriter(out)
+	err = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(root, p)
+		w, err := zw.Create(filepath.ToSlash(rel))
+		if err != nil {
+			return err
+		}
+		f, err := os.Open(p)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = io.Copy(w, f)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return zw.Close()
+}

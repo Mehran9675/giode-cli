@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"flag"
 	"os"
 	"path/filepath"
@@ -86,5 +87,29 @@ func TestReplaceExecutable(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(p); string(b) != "new" {
 		t.Errorf("content %q", b)
+	}
+}
+
+func TestZipTree(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "arm64-v8a"), 0o755)
+	os.WriteFile(filepath.Join(root, "arm64-v8a", "libgio.so"), []byte("elf"), 0o644)
+	os.MkdirAll(filepath.Join(root, "x86_64"), 0o755)
+	os.WriteFile(filepath.Join(root, "x86_64", "libgio.so"), []byte("elf"), 0o644)
+	dst := filepath.Join(t.TempDir(), "native-debug-symbols.zip")
+	if err := zipTree(root, dst); err != nil {
+		t.Fatal(err)
+	}
+	r, err := zip.OpenReader(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var names []string
+	for _, f := range r.File {
+		names = append(names, f.Name)
+	}
+	if strings.Join(names, ",") != "arm64-v8a/libgio.so,x86_64/libgio.so" {
+		t.Errorf("entries %v; Play wants ABI directories at the root", names)
 	}
 }

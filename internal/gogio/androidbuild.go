@@ -223,8 +223,14 @@ func compileAndroid(tmpDir string, tools *androidTools, bi *buildInfo) (err erro
 			return fmt.Errorf("failed to create %q: %v", archDir, err)
 		}
 		libFile := filepath.Join(archDir, "libgio.so")
+		// giode: with a symbols directory, build with symbols, keep a
+		// copy for the Play Console and strip the packaged library.
+		strip := "-w -s "
+		if symbolsDir != "" {
+			strip = ""
+		}
 		cmd := goCommand("build",
-			"-ldflags=-w -s -extldflags \"-Wl,-z,max-page-size=65536\" "+bi.ldflags,
+			"-ldflags="+strip+"-extldflags \"-Wl,-z,max-page-size=65536\" "+bi.ldflags,
 			"-buildmode=c-shared",
 			"-tags", bi.tags,
 			"-o", libFile,
@@ -239,9 +245,15 @@ func compileAndroid(tmpDir string, tools *androidTools, bi *buildInfo) (err erro
 			"CC="+clang,
 			"CXX="+clang+"++",
 		)
+		jniArch := arch.jniArch
 		builds.Go(func() error {
-			_, err := runCmd(cmd)
-			return err
+			if _, err := runCmd(cmd); err != nil {
+				return err
+			}
+			if symbolsDir == "" {
+				return nil
+			}
+			return splitSymbols(tcRoot, libFile, filepath.Join(symbolsDir, jniArch, "libgio.so"))
 		})
 	}
 	appDir, err := runCmd(goCommand("list", "-tags", bi.tags, "-f", "{{.Dir}}", "gioui.org/app/"))
@@ -1105,4 +1117,25 @@ func androidManifest(d manifestData) ([]byte, error) {
 		return nil, err
 	}
 	return b.Bytes(), nil
+}
+
+// symbolsDir, when set, receives each ABI's unstripped library
+// (Options.SymbolsDir).
+var symbolsDir string
+
+// splitSymbols copies the unstripped library to sym and strips lib with
+// the NDK's llvm-strip.
+func splitSymbols(tcRoot, lib, sym string) error {
+	if err := os.MkdirAll(filepath.Dir(sym), 0o755); err != nil {
+		return err
+	}
+	if err := copyFile(sym, lib); err != nil {
+		return err
+	}
+	stripTool := filepath.Join(tcRoot, "bin", "llvm-strip")
+	if runtime.GOOS == "windows" {
+		stripTool += ".exe"
+	}
+	_, err := runCmd(exec.Command(stripTool, "--strip-all", lib))
+	return err
 }

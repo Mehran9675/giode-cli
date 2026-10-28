@@ -241,8 +241,25 @@ func buildTarget(c *config.Config, target string, o buildOpts) (string, error) {
 			return "", fmt.Errorf("patching Gio: %w (set android.gio_patches = false to skip)", err)
 		}
 	}
+	symbols := ""
+	if (target == "android" || target == "aab") && o.release {
+		// Release builds keep the native libraries' symbols for the Play
+		// Console, which symbolizes crash reports with them.
+		if symbols, err = os.MkdirTemp("", "giode-symbols-"); err != nil {
+			return "", err
+		}
+		defer os.RemoveAll(symbols)
+		g.SymbolsDir = symbols
+	}
 	if err := gogio.Build(pkgPath(c), g); err != nil {
 		return "", err
+	}
+	if symbols != "" {
+		zip := filepath.Join(filepath.Dir(g.Output), "native-debug-symbols.zip")
+		if err := zipTree(symbols, zip); err != nil {
+			return "", fmt.Errorf("native debug symbols: %w", err)
+		}
+		fmt.Printf("  %s (upload to the Play Console with the bundle)\n", relPath(zip))
 	}
 	if target == "web" && (c.Web.PWA == nil || *c.Web.PWA) {
 		err := pwa.Make(pwa.App{
