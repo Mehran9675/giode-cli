@@ -48,6 +48,7 @@ func init() {
 		{"release", "build desktop targets and write a signed update feed", releaseUsage, cmdRelease},
 		{"bump", "raise the app's version and build number", bumpUsage, cmdBump},
 		{"ci", "write a GitHub Actions workflow that builds and publishes releases", ciUsage, cmdCI},
+		{"licenses", "collect the licenses of the app's Go modules for its notices screen", licensesUsage, cmdLicenses},
 		{"upgrade", "update the project to the latest giode", upgradeUsage, cmdUpgrade},
 		{"manifest", "print the Android manifest and Info.plist additions from giode.toml", manifestUsage, cmdManifest},
 		{"clean", "remove build output", cleanUsage, cmdClean},

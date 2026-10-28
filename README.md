@@ -64,6 +64,7 @@ target needs.
 | `giode release [targets]` | Builds desktop targets and writes `dist/update/`: the downloads, `feed.json` and its signature, for apps using the giode `update` package. |
 | `giode bump [major\|minor\|patch\|build]` | Raises `app.version` and always `app.build`. In CI, `$GIODE_VERSION` (a tag like `v1.4.2`) and `$GIODE_BUILD` override both. |
 | `giode ci` | Writes `.github/workflows/release.yml`: on a version tag, builds Linux, Windows, Android and macOS packages, signed with the repository's secrets when present, and attaches them to a GitHub release. |
+| `giode licenses` | Writes the licenses of the app's Go modules (on any platform) and Go's to `assets/licenses.json` (or `app.licenses`, refreshed on every build) for `giode.LicensesView`. |
 | `giode upgrade [version]` | Updates the project's giode dependency and tidies `go.mod`. |
 | `giode manifest [android\|ios\|macos]` | Prints what `giode.toml` adds to the manifest and Info.plist. |
 | `giode clean` | Removes `dist`. |

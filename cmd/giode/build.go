@@ -196,6 +196,12 @@ func expandTargets(ts []string) []string {
 
 // buildTarget builds one target and returns the output path.
 func buildTarget(c *config.Config, target string, o buildOpts) (string, error) {
+	if c.App.Licenses != "" && !licensesWritten[c.Dir] {
+		licensesWritten[c.Dir] = true
+		if _, err := writeLicenses(c, c.Path(c.App.Licenses)); err != nil {
+			return "", fmt.Errorf("app.licenses: %w", err)
+		}
+	}
 	switch target {
 	case "linux":
 		return buildLinux(c, o)
@@ -585,3 +591,7 @@ func desktopLdflags(c *config.Config, target string) string {
 	}
 	return strings.Join(strings.Fields(flags), " ")
 }
+
+// licensesWritten records projects whose app.licenses this run already
+// refreshed.
+var licensesWritten = map[string]bool{}

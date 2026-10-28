@@ -76,6 +76,9 @@ type App struct {
 	// Tags are Go build tags; Ldflags extra linker flags.
 	Tags    string `toml:"tags"`
 	Ldflags string `toml:"ldflags"`
+	// Licenses is a JSON file every build refreshes with the licenses of
+	// the app's modules (see giode licenses).
+	Licenses string `toml:"licenses"`
 	// Output is where builds go, "dist" by default.
 	Output string `toml:"output"`
 }
