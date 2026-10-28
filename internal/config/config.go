@@ -58,6 +58,11 @@ type App struct {
 	Package string `toml:"package"`
 	// Schemes are URL schemes the app opens (myapp://...).
 	Schemes []string `toml:"schemes"`
+	// Links are https URLs the app opens instead of the browser -
+	// universal links on iOS and macOS, App Links on Android - like
+	// https://example.com/app/*. giode links writes the files the site
+	// must serve to prove the app may.
+	Links []string `toml:"links"`
 	// Publisher is who makes the app, shown by installers and in
 	// Windows' list of installed apps; Description a one-line summary;
 	// Website the app's home page.
@@ -108,6 +113,10 @@ type Android struct {
 	// Android debug key.
 	Keystore        string `toml:"keystore"`
 	KeystorePassEnv string `toml:"keystore_pass_env"`
+	// Fingerprints are SHA-256 fingerprints of more signing
+	// certificates allowed to open app.links: Play App Signing's, from
+	// the Play Console. The keystore's is added by giode links.
+	Fingerprints []string `toml:"fingerprints"`
 }
 
 // IOS configures iOS builds.
@@ -124,6 +133,9 @@ type IOS struct {
 	Plist map[string]any `toml:"plist"`
 	// Profile is the provisioning profile signing device builds.
 	Profile string `toml:"profile"`
+	// TeamID is the Apple developer team ID, for universal links'
+	// apple-app-site-association file.
+	TeamID string `toml:"team_id"`
 }
 
 // MacOS configures macOS app bundles.
@@ -341,6 +353,9 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("app.build must be at least 1"))
 	}
 	errs = append(errs, c.validateContextActions()...)
+	if _, err := c.ParseLinks(); err != nil {
+		errs = append(errs, err)
+	}
 	errs = append(errs, c.Privacy.validate()...)
 	if cmd := c.Windows.Signing.Command; len(cmd) > 0 && !strings.Contains(strings.Join(cmd, " "), "{file}") {
 		errs = append(errs, errors.New("windows.signing.command must contain {file}, where the file to sign goes"))

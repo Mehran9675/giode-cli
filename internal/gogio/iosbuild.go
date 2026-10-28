@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"text/template"
@@ -165,6 +166,9 @@ func signApple(appID, tmpDir, embedded, app string, provisions []string) error {
 		}
 		entFile := filepath.Join(tmpDir, "entitlements.plist")
 		if err := os.WriteFile(entFile, []byte(entitlements), 0o660); err != nil {
+			return err
+		}
+		if err := applyEntitlements(entFile, extras.Entitlements); err != nil {
 			return err
 		}
 		identity := sha1.Sum(certDER)
@@ -662,4 +666,37 @@ func zipDir(dst, base, dir string) (err error) {
 		return err
 	}
 	return zipf.Close()
+}
+
+// applyEntitlements replaces or adds entitlements in the plist file:
+// giode's (associated domains, push) on top of the profile's.
+func applyEntitlements(file string, ents map[string]any) error {
+	keys := make([]string, 0, len(ents))
+	for k := range ents {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args := []string{"-c", "Delete :" + k}
+		switch v := ents[k].(type) {
+		case string:
+			args = append(args, "-c", "Add :"+k+" string "+v)
+		case bool:
+			args = append(args, "-c", fmt.Sprintf("Add :%s bool %t", k, v))
+		case []string:
+			args = append(args, "-c", "Add :"+k+" array")
+			for i, e := range v {
+				args = append(args, "-c", fmt.Sprintf("Add :%s:%d string %s", k, i, e))
+			}
+		default:
+			return fmt.Errorf("entitlement %s: unsupported value %T", k, v)
+		}
+		// Delete fails when the key is missing; PlistBuddy carries on
+		// with the other commands.
+		cmd := exec.Command("/usr/libexec/PlistBuddy", append(args, file)...)
+		if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "Does Not Exist") {
+			return fmt.Errorf("entitlement %s: %v: %s", k, err, out)
+		}
+	}
+	return nil
 }

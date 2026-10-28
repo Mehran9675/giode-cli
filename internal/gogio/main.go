@@ -123,6 +123,13 @@ type Extras struct {
 	// PrivacyManifest is the PrivacyInfo.xcprivacy file written into
 	// iOS and macOS app bundles.
 	PrivacyManifest []byte
+	// AndroidActivity is XML added inside the app's <activity>: intent
+	// filters for App Links.
+	AndroidActivity string
+	// Entitlements replace or add entitlements of iOS (and macOS
+	// provisioning profile) signing: strings, booleans and lists of
+	// strings, by key.
+	Entitlements map[string]any
 }
 
 // Build builds and packages the Go package pkg as gogio would.

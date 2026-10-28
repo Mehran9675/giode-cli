@@ -344,7 +344,7 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 			g.Arch = strings.Join(c.Android.Arch, ",")
 		}
 		perms, manifest, app := c.AndroidExtras()
-		g.Extras = gogio.Extras{AndroidPermissions: perms, AndroidManifest: manifest, AndroidApplication: app}
+		g.Extras = gogio.Extras{AndroidPermissions: perms, AndroidManifest: manifest, AndroidApplication: app, AndroidActivity: c.AndroidActivityXML()}
 		if o.release {
 			if c.Android.Keystore == "" {
 				return g, errors.New("-release needs android.keystore in giode.toml (giode keystore creates one)")
@@ -381,7 +381,7 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 		if err != nil {
 			return g, err
 		}
-		g.Extras = gogio.Extras{InfoPlist: plist, PrivacyManifest: privacy}
+		g.Extras = gogio.Extras{InfoPlist: plist, PrivacyManifest: privacy, Entitlements: c.AppleEntitlements()}
 		platform, file = "ios", binaryName(c)+".ipa"
 		if target == "ios-sim" {
 			// gogio builds simulator apps for amd64; Xcode runs them on
@@ -410,7 +410,7 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 		if err != nil {
 			return g, err
 		}
-		g.Extras = gogio.Extras{InfoPlist: plist, PrivacyManifest: privacy}
+		g.Extras = gogio.Extras{InfoPlist: plist, PrivacyManifest: privacy, Entitlements: c.AppleEntitlements()}
 		if o.release {
 			switch {
 			case c.MacOS.Profile != "":
@@ -520,8 +520,15 @@ func buildLinux(c *config.Config, o buildOpts) (string, error) {
 	if len(c.Linux.Categories) > 0 {
 		cats = strings.Join(c.Linux.Categories, ";") + ";"
 	}
-	desktop := fmt.Sprintf("[Desktop Entry]\nType=Application\nName=%s\nExec=%s\nIcon=%s\nCategories=%s\nTerminal=false\n",
+	desktop := fmt.Sprintf("[Desktop Entry]\nType=Application\nName=%s\nExec=%s %%U\nIcon=%s\nCategories=%s\nTerminal=false\n",
 		c.App.Name, filepath.Base(bin), c.App.ID, cats)
+	if len(c.App.Schemes) > 0 {
+		var types []string
+		for _, s := range c.App.Schemes {
+			types = append(types, "x-scheme-handler/"+s)
+		}
+		desktop += "MimeType=" + strings.Join(types, ";") + ";\n"
+	}
 	if err := os.WriteFile(filepath.Join(d, c.App.ID+".desktop"), []byte(desktop), 0o644); err != nil {
 		return "", err
 	}

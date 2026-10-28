@@ -55,6 +55,8 @@ type manifestData struct {
 	// ManifestXML and ApplicationXML come from Extras.
 	ManifestXML    string
 	ApplicationXML string
+	// ActivityXML goes inside the activity (Extras.AndroidActivity).
+	ActivityXML string
 }
 
 const (
@@ -460,6 +462,7 @@ func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, pe
 		PackageQueries: bi.packageQueries,
 		ManifestXML:    extras.AndroidManifest,
 		ApplicationXML: extras.AndroidApplication,
+		ActivityXML:    extras.AndroidActivity,
 	}
 	manifestXML, err := androidManifest(manifestSrc)
 	if err != nil {
@@ -1089,6 +1092,7 @@ var apkManifest = template.Must(template.New("manifest").Parse(
 				<data android:scheme="{{.}}"></data>
 			</intent-filter>
 			{{end}}
+{{.ActivityXML}}
 		</activity>
 {{.ApplicationXML}}
 	</application>

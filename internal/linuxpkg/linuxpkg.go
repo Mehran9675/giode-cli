@@ -43,6 +43,8 @@ type App struct {
 	// FlatpakPermissions are Flatpak finish-args; a desktop app's
 	// defaults (display, GPU, network, sound) when empty.
 	FlatpakPermissions []string
+	// Schemes are URL schemes the app opens.
+	Schemes []string
 }
 
 // File is a file to install, by absolute path.
@@ -116,6 +118,13 @@ func DesktopEntry(a App) string {
 		fmt.Fprintf(&b, "Comment=%s\n", a.Summary)
 	}
 	fmt.Fprintf(&b, "Exec=%s %%U\nIcon=%s\nCategories=%s\nTerminal=false\nStartupWMClass=%s\n", a.Command, a.ID, cats, a.Command)
+	if len(a.Schemes) > 0 {
+		var types []string
+		for _, s := range a.Schemes {
+			types = append(types, "x-scheme-handler/"+s)
+		}
+		fmt.Fprintf(&b, "MimeType=%s;\n", strings.Join(types, ";"))
+	}
 	return b.String()
 }
 

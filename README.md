@@ -59,6 +59,7 @@ target needs.
 | `giode keystore` | Creates an Android release keystore and points `giode.toml` at it. |
 | `giode cert` | Creates a self-signed Windows code signing certificate for testing and points `giode.toml` at it. |
 | `giode sign <file>...` | Signs Windows executables and installers with the configured certificate. |
+| `giode links` | Writes `.well-known/assetlinks.json` and `apple-app-site-association` for each host in `app.links`, to upload to your site (fingerprints from `android.keystore` and `android.fingerprints`, team from `ios.team_id`). |
 | `giode upgrade [version]` | Updates the project's giode dependency and tidies `go.mod`. |
 | `giode manifest [android\|ios\|macos]` | Prints what `giode.toml` adds to the manifest and Info.plist. |
 | `giode clean` | Removes `dist`. |
@@ -101,6 +102,7 @@ publisher = "Example Ltd"     # shown by installers and Windows' app list
 description = "An AI agent in your pocket."
 website = "https://example.com"
 schemes = ["agent"]           # URL schemes the app opens
+links = ["https://example.com/app/*"]   # universal links / App Links; see giode links
 tags = ""                     # Go build tags
 ldflags = ""                  # extra linker flags
 output = "dist"

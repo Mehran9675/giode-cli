@@ -25,7 +25,7 @@ func linuxApp(c *config.Config, bin, arch string) linuxpkg.App {
 		Publisher: c.App.Publisher, Maintainer: c.Linux.Maintainer,
 		Website: c.App.Website, License: c.Linux.License, Categories: c.Linux.Categories,
 		Binary: bin, Command: filepath.Base(bin), Icon: c.Path(c.App.Icon), Arch: arch,
-		FlatpakPermissions: c.Linux.FlatpakPermissions,
+		FlatpakPermissions: c.Linux.FlatpakPermissions, Schemes: c.App.Schemes,
 	}
 }
 
