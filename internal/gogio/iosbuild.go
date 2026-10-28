@@ -237,6 +237,11 @@ func exeIOS(tmpDir, target, app string, bi *buildInfo) error {
 	if _, err := runCmd(lipo); err != nil {
 		return err
 	}
+	if len(extras.PrivacyManifest) > 0 {
+		if err := os.WriteFile(filepath.Join(app, "PrivacyInfo.xcprivacy"), extras.PrivacyManifest, 0o644); err != nil {
+			return err
+		}
+	}
 	infoPlist := buildInfoPlist(bi)
 	plistFile := filepath.Join(app, "Info.plist")
 	if err := os.WriteFile(plistFile, []byte(infoPlist), 0o660); err != nil {

@@ -158,6 +158,17 @@ categories = ["Utility", "Office"]
 [web]
 port = 8080
 
+# The privacy manifest (PrivacyInfo.xcprivacy) App Store apps need. giode always
+# declares the system boot time and file timestamp APIs Go itself uses.
+[privacy]
+tracking = false
+[[privacy.collected]]
+type = "crash_data"           # Apple's data types, by short or full name
+linked = false
+purposes = ["app_functionality"]
+[privacy.api]
+user_defaults = ["CA92.1"]    # more required-reason APIs your code uses
+
 # Entries in the file manager's right-click menu that open the app with the
 # chosen paths (giode.Config.OnContextAction receives them).
 [[context_actions]]

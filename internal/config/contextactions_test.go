@@ -82,3 +82,44 @@ func TestContextActions_Validate(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestPrivacyManifest(t *testing.T) {
+	c, err := load(t, `[app]
+name = "A"
+id = "com.example.a"
+
+[privacy]
+tracking_domains = ["t.example.com"]
+[[privacy.collected]]
+type = "email_address"
+linked = true
+purposes = ["app_functionality", "NSPrivacyCollectedDataTypePurposeAnalytics"]
+[privacy.api]
+user_defaults = ["CA92.1"]
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := c.PrivacyManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, w := range []string{
+		"<key>NSPrivacyTracking</key>\n\t<false/>",
+		"<string>t.example.com</string>",
+		"<key>NSPrivacyCollectedDataType</key><string>NSPrivacyCollectedDataTypeEmailAddress</string>",
+		"<key>NSPrivacyCollectedDataTypeLinked</key><true/>",
+		"<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string><string>NSPrivacyCollectedDataTypePurposeAnalytics</string>",
+		"<string>NSPrivacyAccessedAPICategoryFileTimestamp</string><key>NSPrivacyAccessedAPITypeReasons</key><array><string>C617.1</string></array>",
+		"<string>NSPrivacyAccessedAPICategorySystemBootTime</string>",
+		"<string>NSPrivacyAccessedAPICategoryUserDefaults</string><key>NSPrivacyAccessedAPITypeReasons</key><array><string>CA92.1</string></array>",
+	} {
+		if !strings.Contains(s, w) {
+			t.Errorf("manifest lacks %q:\n%s", w, s)
+		}
+	}
+	if _, err := load(t, "[app]\nname = \"A\"\nid = \"com.example.a\"\n[[privacy.collected]]\ntype = \"shoe_size\"\n"); err == nil {
+		t.Error("unknown data type accepted")
+	}
+}

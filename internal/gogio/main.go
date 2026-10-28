@@ -120,6 +120,9 @@ type Extras struct {
 	// InfoPlist is XML key/value pairs added to the iOS, tvOS and
 	// macOS Info.plist dictionary.
 	InfoPlist string
+	// PrivacyManifest is the PrivacyInfo.xcprivacy file written into
+	// iOS and macOS app bundles.
+	PrivacyManifest []byte
 }
 
 // Build builds and packages the Go package pkg as gogio would.

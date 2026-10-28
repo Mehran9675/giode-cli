@@ -348,7 +348,11 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 		if err != nil {
 			return g, err
 		}
-		g.Extras = gogio.Extras{InfoPlist: plist}
+		privacy, err := c.PrivacyManifest()
+		if err != nil {
+			return g, err
+		}
+		g.Extras = gogio.Extras{InfoPlist: plist, PrivacyManifest: privacy}
 		platform, file = "ios", binaryName(c)+".ipa"
 		if target == "ios-sim" {
 			// gogio builds simulator apps for amd64; Xcode runs them on
@@ -373,7 +377,11 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 		if err != nil {
 			return g, err
 		}
-		g.Extras = gogio.Extras{InfoPlist: plist}
+		privacy, err := c.PrivacyManifest()
+		if err != nil {
+			return g, err
+		}
+		g.Extras = gogio.Extras{InfoPlist: plist, PrivacyManifest: privacy}
 		if o.release {
 			switch {
 			case c.MacOS.Profile != "":

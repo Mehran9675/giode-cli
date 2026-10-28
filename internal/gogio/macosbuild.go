@@ -210,6 +210,11 @@ func (b *macBuilder) buildProgram(buildInfo *buildInfo, binDest string, name str
 	if err := os.WriteFile(filepath.Join(binDest, "/Contents/Info.plist"), b.Manifest, 0o755); err != nil {
 		return err
 	}
+	if len(extras.PrivacyManifest) > 0 {
+		if err := os.WriteFile(filepath.Join(binDest, "/Contents/Resources/PrivacyInfo.xcprivacy"), extras.PrivacyManifest, 0o644); err != nil {
+			return err
+		}
+	}
 
 	cmd := goCommand("build",
 		"-ldflags="+buildInfo.ldflags,
