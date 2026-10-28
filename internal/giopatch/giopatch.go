@@ -27,7 +27,7 @@ type patch struct {
 
 // revision changes whenever the patches do, so cached copies made with
 // older patches aren't used.
-const revision = "4"
+const revision = "6"
 
 // androidPacing makes Android render at the display's refresh rate.
 // Gio asks the Choreographer for the next frame only after presenting
@@ -145,14 +145,54 @@ var underlay = []patch{
 			return err
 		}
 		f(giodeTarget(target, viewport))
-		return w.gpu.Frame(frame, target, viewport)
+		if err := w.gpu.Frame(frame, target, viewport); err != nil {
+			return err
+		}
+		if f := giodeAfterFrame; f != nil {
+			// The finished frame, before it's presented: read back for
+			// screenshots.
+			f(giodeTarget(target, viewport))
+		}
+		return nil
 	}
+`,
+	},
+	{
+		file: "app/window.go",
+		old: `	if w.gpu != nil {
+		w.ctx.Lock()
+		w.gpu.Release()
+`,
+		new: `	if w.gpu != nil {
+		w.ctx.Lock()
+		if f := giodeUnderlayRelease; f != nil {
+			// giode: the underlay frees its GPU resources while the
+			// context is current, before it's destroyed.
+			f()
+		}
+		w.gpu.Release()
 `,
 	},
 	{
 		file: "app/window.go",
 		old:  `gpu, err := gpu.New(w.ctx.API())`,
 		new:  `gpu, err := gpu.New(giodeAPI(w.ctx.API()))`,
+	},
+	{
+		file: "app/window.go",
+		old: `		if !e2.Valid() && w.gpu != nil {
+			w.ctx.Lock()
+			w.gpu.Release()
+`,
+		new: `		if !e2.Valid() && w.gpu != nil {
+			w.ctx.Lock()
+			if f := giodeUnderlayRelease; f != nil {
+				// giode: the view is going away (the window closing, an
+				// Android surface destroyed).
+				f()
+			}
+			w.gpu.Release()
+`,
 	},
 	{
 		file: "app/d3d11_windows.go",
@@ -246,8 +286,10 @@ type GiodeTarget struct {
 }
 
 var (
-	giodeUnderlay func(GiodeTarget)
-	giodeForceGL  bool
+	giodeUnderlay        func(GiodeTarget)
+	giodeForceGL         bool
+	giodeUnderlayRelease func()
+	giodeAfterFrame      func(GiodeTarget)
 )
 
 // GiodeSetUnderlay sets the function drawing under the UI each frame,
@@ -255,6 +297,15 @@ var (
 // Direct3D. Call it before creating windows.
 func GiodeSetUnderlay(f func(GiodeTarget), forceGL bool) {
 	giodeUnderlay, giodeForceGL = f, forceGL
+}
+
+// GiodeSetUnderlayHooks sets the functions run on the render thread,
+// with the GPU context current: release before Gio releases its GPU
+// resources (the window closes, its view goes away, or the context is
+// lost and made again), afterFrame once the UI is drawn over the underlay, before
+// the frame is presented. Call it before creating windows.
+func GiodeSetUnderlayHooks(release func(), afterFrame func(GiodeTarget)) {
+	giodeUnderlayRelease, giodeAfterFrame = release, afterFrame
 }
 
 // giodeAPI makes Gio's OpenGL backend save and restore the GL state
@@ -318,17 +369,564 @@ func giodeTarget(t gpu.RenderTarget, size image.Point) GiodeTarget {
 	},
 }
 
+// windowsMinimized makes Windows report minimized windows: Gio reads
+// the window's placement on every position change, but takes a
+// minimized window for a restored one, so Minimized never arrives and
+// restoring from it changes nothing either.
+var windowsMinimized = []patch{
+	{
+		file: "app/os_windows.go",
+		old: `	switch {
+	case p.IsMaximized() && style&windows.WS_OVERLAPPEDWINDOW != 0:
+		w.config.Mode = Maximized
+`,
+		new: `	switch {
+	case p.IsMinimized():
+		// giode: minimized, and restored from it.
+		w.config.Mode = Minimized
+	case p.IsMaximized() && style&windows.WS_OVERLAPPEDWINDOW != 0:
+		w.config.Mode = Maximized
+`,
+	},
+}
+
+// fileDrag delivers files dragged onto a Linux window, behind giode's
+// Config.OnFileDrop and OnFileDrag: XDND on X11, wl_data_device's drag
+// and drop on Wayland. Both offer text/uri-list; the hook gets the
+// drag's position in pixels and, on drop, the list.
+var fileDrag = []patch{
+	{
+		file: "app/giode_drag.go",
+		new: `// Added by giode's Gio patches: files dragged onto the window.
+
+package app
+
+// Kinds of GiodeSetFileDrag's events.
+const (
+	GiodeDragEnter = 1 + iota
+	GiodeDragOver
+	GiodeDragLeave
+	GiodeDragDrop
+)
+
+var giodeDrag func(kind int, x, y float32, uris string)
+
+// GiodeSetFileDrag sets the function receiving file drags on X11 and
+// Wayland windows: enter, over and leave with the position in pixels,
+// then drop with the files' text/uri-list. It's called on Gio's event
+// goroutine, or (a drop on Wayland) its own. Call it before creating
+// windows: they accept drags only when it's set.
+func GiodeSetFileDrag(f func(kind int, x, y float32, uris string)) {
+	giodeDrag = f
+}
+`,
+	},
+	{
+		file: "app/os_x11.go",
+		old: `	wakeups chan struct{}
+	handler x11EventHandler
+`,
+		new: `	wakeups chan struct{}
+	handler x11EventHandler
+	// giode: file drags (XDND).
+	giodeXdnd giodeXdnd
+`,
+	},
+	{
+		file: "app/os_x11.go",
+		old: `		case C.SelectionNotify:
+			cevt := (*C.XSelectionEvent)(unsafe.Pointer(xev))
+`,
+		new: `		case C.SelectionNotify:
+			cevt := (*C.XSelectionEvent)(unsafe.Pointer(xev))
+			if w.giodeXdndSelection(unsafe.Pointer(cevt)) {
+				break
+			}
+`,
+	},
+	{
+		file: "app/os_x11.go",
+		old: `			cevt := (*C.XClientMessageEvent)(unsafe.Pointer(xev))
+			switch *(*C.long)(unsafe.Pointer(&cevt.data)) {
+`,
+		new: `			cevt := (*C.XClientMessageEvent)(unsafe.Pointer(xev))
+			if w.giodeXdndMessage(unsafe.Pointer(cevt)) {
+				break
+			}
+			switch *(*C.long)(unsafe.Pointer(&cevt.data)) {
+`,
+	},
+	{
+		file: "app/os_x11.go",
+		old: `	// extensions
+	C.XSetWMProtocols(dpy, win, &w.atoms.evDelWindow, 1)
+`,
+		new: `	// extensions
+	C.XSetWMProtocols(dpy, win, &w.atoms.evDelWindow, 1)
+	w.giodeXdndInit(unsafe.Pointer(dpy), uintptr(win))
+`,
+	},
+	{
+		file: "app/giode_xdnd_x11.go",
+		new: `// Added by giode's Gio patches: XDND, file drags onto X11 windows.
+
+//go:build ((linux && !android) || freebsd || openbsd) && !nox11
+
+package app
+
+/*
+#cgo freebsd openbsd CFLAGS: -I/usr/X11R6/include -I/usr/local/include
+#cgo freebsd openbsd LDFLAGS: -L/usr/X11R6/lib -L/usr/local/lib -lX11
+#cgo linux pkg-config: x11
+
+#include <stdlib.h>
+#include <X11/Xlib.h>
+#include <X11/Xatom.h>
+*/
+import "C"
+
+import "unsafe"
+
+// xdndVersion is the protocol version giode speaks.
+const xdndVersion = 5
+
+type giodeXdnd struct {
+	dpy *C.Display
+	win C.Window
+	// source is the window dragging onto this one, 0 between drags.
+	source  C.Window
+	version int
+	accept  bool
+	entered bool
+	x, y    float32
+	atoms   struct {
+		aware, enter, position, status, leave, drop, finished,
+		selection, typeList, actionCopy, uriList, property C.Atom
+	}
+}
+
+func (w *x11Window) giodeXdndInit(dpy unsafe.Pointer, win uintptr) {
+	if giodeDrag == nil {
+		return
+	}
+	d := &w.giodeXdnd
+	d.dpy, d.win = (*C.Display)(dpy), C.Window(win)
+	atom := func(name string) C.Atom {
+		c := C.CString(name)
+		defer C.free(unsafe.Pointer(c))
+		return C.XInternAtom(d.dpy, c, C.False)
+	}
+	a := &d.atoms
+	a.aware, a.enter, a.position, a.status = atom("XdndAware"), atom("XdndEnter"), atom("XdndPosition"), atom("XdndStatus")
+	a.leave, a.drop, a.finished, a.selection = atom("XdndLeave"), atom("XdndDrop"), atom("XdndFinished"), atom("XdndSelection")
+	a.typeList, a.actionCopy, a.uriList = atom("XdndTypeList"), atom("XdndActionCopy"), atom("text/uri-list")
+	a.property = atom("GIODE_XDND")
+	version := C.long(xdndVersion)
+	C.XChangeProperty(d.dpy, d.win, a.aware, C.XA_ATOM, 32, C.PropModeReplace, (*C.uchar)(unsafe.Pointer(&version)), 1)
+}
+
+// giodeXdndMessage handles an XDND client message, reporting whether
+// it was one.
+func (w *x11Window) giodeXdndMessage(p unsafe.Pointer) bool {
+	d := &w.giodeXdnd
+	ev := (*C.XClientMessageEvent)(p)
+	if d.atoms.aware == 0 || ev.format != 32 {
+		return false
+	}
+	l := (*[5]C.long)(unsafe.Pointer(&ev.data))
+	a := &d.atoms
+	switch ev.message_type {
+	case a.enter:
+		d.source, d.version, d.entered, d.accept = C.Window(l[0]), int(l[1]>>24), false, false
+		types := []C.Atom{C.Atom(l[2]), C.Atom(l[3]), C.Atom(l[4])}
+		if l[1]&1 != 0 {
+			types = d.typeList()
+		}
+		for _, t := range types {
+			if t == a.uriList {
+				d.accept = true
+			}
+		}
+	case a.position:
+		if C.Window(l[0]) != d.source {
+			return true
+		}
+		var x, y C.int
+		var child C.Window
+		C.XTranslateCoordinates(d.dpy, C.XDefaultRootWindow(d.dpy), d.win, C.int(l[2]>>16), C.int(l[2]&0xffff), &x, &y, &child)
+		d.x, d.y = float32(x), float32(y)
+		var status [5]C.long
+		status[0] = C.long(d.win)
+		if d.accept {
+			kind := GiodeDragOver
+			if !d.entered {
+				d.entered, kind = true, GiodeDragEnter
+			}
+			giodeDrag(kind, d.x, d.y, "")
+			status[1] = 1 | 2 // accepted; send every position
+			status[4] = C.long(a.actionCopy)
+		}
+		d.send(a.status, status)
+	case a.leave:
+		if C.Window(l[0]) != d.source {
+			return true
+		}
+		if d.entered {
+			giodeDrag(GiodeDragLeave, d.x, d.y, "")
+		}
+		d.source, d.entered = 0, false
+	case a.drop:
+		if C.Window(l[0]) != d.source {
+			return true
+		}
+		if !d.accept {
+			d.finish(false)
+			return true
+		}
+		t := C.Time(C.CurrentTime)
+		if d.version >= 1 {
+			t = C.Time(l[2])
+		}
+		C.XConvertSelection(d.dpy, a.selection, a.uriList, a.property, d.win, t)
+		C.XFlush(d.dpy)
+	default:
+		return false
+	}
+	return true
+}
+
+// giodeXdndSelection reads a dropped uri-list, reporting whether the
+// event was the drop's.
+func (w *x11Window) giodeXdndSelection(p unsafe.Pointer) bool {
+	d := &w.giodeXdnd
+	ev := (*C.XSelectionEvent)(p)
+	if d.atoms.aware == 0 || ev.selection != d.atoms.selection {
+		return false
+	}
+	var uris string
+	if ev.property != C.None {
+		var typ C.Atom
+		var format C.int
+		var n, after C.ulong
+		var data *C.uchar
+		if C.XGetWindowProperty(d.dpy, d.win, d.atoms.property, 0, 1<<24, C.True, C.AnyPropertyType, &typ, &format, &n, &after, &data) == C.Success && data != nil {
+			if format == 8 {
+				uris = C.GoStringN((*C.char)(unsafe.Pointer(data)), C.int(n))
+			}
+			C.XFree(unsafe.Pointer(data))
+		}
+	}
+	if d.source != 0 {
+		giodeDrag(GiodeDragDrop, d.x, d.y, uris)
+		d.finish(uris != "")
+	}
+	return true
+}
+
+// typeList reads the source's XdndTypeList, for drags of more than
+// three types.
+func (d *giodeXdnd) typeList() []C.Atom {
+	var typ C.Atom
+	var format C.int
+	var n, after C.ulong
+	var data *C.uchar
+	if C.XGetWindowProperty(d.dpy, d.source, d.atoms.typeList, 0, 1024, C.False, C.XA_ATOM, &typ, &format, &n, &after, &data) != C.Success || data == nil {
+		return nil
+	}
+	defer C.XFree(unsafe.Pointer(data))
+	if format != 32 {
+		return nil
+	}
+	// Format 32 properties are arrays of C longs.
+	longs := unsafe.Slice((*C.long)(unsafe.Pointer(data)), int(n))
+	types := make([]C.Atom, len(longs))
+	for i, v := range longs {
+		types[i] = C.Atom(v)
+	}
+	return types
+}
+
+func (d *giodeXdnd) finish(ok bool) {
+	var l [5]C.long
+	l[0] = C.long(d.win)
+	if ok {
+		l[1] = 1
+		l[2] = C.long(d.atoms.actionCopy)
+	}
+	d.send(d.atoms.finished, l)
+	d.source, d.entered = 0, false
+}
+
+func (d *giodeXdnd) send(typ C.Atom, l [5]C.long) {
+	var xev C.XEvent
+	ev := (*C.XClientMessageEvent)(unsafe.Pointer(&xev))
+	ev._type = C.ClientMessage
+	ev.display = d.dpy
+	ev.window = d.source
+	ev.message_type = typ
+	ev.format = 32
+	*(*[5]C.long)(unsafe.Pointer(&ev.data)) = l
+	C.XSendEvent(d.dpy, d.source, C.False, C.NoEventMask, &xev)
+	C.XFlush(d.dpy)
+}
+`,
+	},
+	{
+		file: "app/os_wayland.go",
+		old: `	// content is the data belonging to source.
+	content []byte
+}
+`,
+		new: `	// content is the data belonging to source.
+	content []byte
+
+	// giode: the file drag over one of the windows.
+	giodeDnd giodeDnd
+}
+`,
+	},
+	{
+		file: "app/os_wayland.go",
+		old: `		if o == s.clipboard {
+			continue
+		}
+`,
+		new: `		if o == s.clipboard || o == s.giodeDnd.offer {
+			continue
+		}
+`,
+	},
+	{
+		file: "app/os_wayland.go",
+		old: `	s := callbackLoad(data).(*wlSeat)
+	s.serial = serial
+	s.flushOffers()
+}
+`,
+		new: `	s := callbackLoad(data).(*wlSeat)
+	s.serial = serial
+	s.giodeDndEnter(serial, surf, x, y, id)
+	s.flushOffers()
+}
+`,
+	},
+	{
+		file: "app/os_wayland.go",
+		old: `func gio_onDataOfferAction(data unsafe.Pointer, offer *C.struct_wl_data_offer, act C.uint32_t) {
+}
+`,
+		new: `func gio_onDataOfferAction(data unsafe.Pointer, offer *C.struct_wl_data_offer, act C.uint32_t) {
+	if s := callbackLoad(data).(*wlSeat); offer == s.giodeDnd.offer {
+		s.giodeDnd.action = act
+	}
+}
+`,
+	},
+	{
+		file: "app/os_wayland.go",
+		old: `func gio_onDataDeviceLeave(data unsafe.Pointer, dataDev *C.struct_wl_data_device) {
+}
+`,
+		new: `func gio_onDataDeviceLeave(data unsafe.Pointer, dataDev *C.struct_wl_data_device) {
+	callbackLoad(data).(*wlSeat).giodeDndLeave()
+}
+`,
+	},
+	{
+		file: "app/os_wayland.go",
+		old: `func gio_onDataDeviceMotion(data unsafe.Pointer, dataDev *C.struct_wl_data_device, t C.uint32_t, x, y C.wl_fixed_t) {
+}
+`,
+		new: `func gio_onDataDeviceMotion(data unsafe.Pointer, dataDev *C.struct_wl_data_device, t C.uint32_t, x, y C.wl_fixed_t) {
+	callbackLoad(data).(*wlSeat).giodeDndMotion(x, y)
+}
+`,
+	},
+	{
+		file: "app/os_wayland.go",
+		old: `func gio_onDataDeviceDrop(data unsafe.Pointer, dataDev *C.struct_wl_data_device) {
+}
+`,
+		new: `func gio_onDataDeviceDrop(data unsafe.Pointer, dataDev *C.struct_wl_data_device) {
+	callbackLoad(data).(*wlSeat).giodeDndDrop()
+}
+`,
+	},
+	{
+		file: "app/giode_dnd_wayland.go",
+		new: `// Added by giode's Gio patches: file drags onto Wayland windows.
+
+//go:build ((linux && !android) || freebsd) && !nowayland
+
+package app
+
+/*
+#cgo linux pkg-config: wayland-client
+#cgo freebsd LDFLAGS: -lwayland-client
+#cgo freebsd CFLAGS: -I/usr/local/include
+
+#include <stdlib.h>
+#include <wayland-client.h>
+*/
+import "C"
+
+import (
+	"io"
+	"os"
+	"time"
+	"unsafe"
+)
+
+const uriListMime = "text/uri-list"
+
+type giodeDnd struct {
+	offer  *C.struct_wl_data_offer
+	win    *window
+	action C.uint32_t
+	x, y   float32
+}
+
+func (s *wlSeat) giodeDndEnter(serial C.uint32_t, surf *C.struct_wl_surface, x, y C.wl_fixed_t, id *C.struct_wl_data_offer) {
+	s.giodeDndLeave()
+	if giodeDrag == nil || id == nil || surf == nil {
+		return
+	}
+	v, _ := callbackMap.Load(unsafe.Pointer(surf))
+	w, ok := v.(*window)
+	if !ok {
+		return
+	}
+	found := false
+	for _, m := range s.offers[id] {
+		if m == uriListMime {
+			found = true
+		}
+	}
+	if !found {
+		C.wl_data_offer_accept(id, serial, nil)
+		return
+	}
+	mime := C.CString(uriListMime)
+	defer C.free(unsafe.Pointer(mime))
+	C.wl_data_offer_accept(id, serial, mime)
+	if C.wl_proxy_get_version((*C.struct_wl_proxy)(unsafe.Pointer(id))) >= 3 {
+		C.wl_data_offer_set_actions(id, C.WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY, C.WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY)
+	}
+	s.giodeDnd = giodeDnd{offer: id, win: w}
+	s.giodeDndMove(x, y)
+	giodeDrag(GiodeDragEnter, s.giodeDnd.x, s.giodeDnd.y, "")
+}
+
+func (s *wlSeat) giodeDndMove(x, y C.wl_fixed_t) {
+	scale := float32(s.giodeDnd.win.scale)
+	s.giodeDnd.x, s.giodeDnd.y = fromFixed(x)*scale, fromFixed(y)*scale
+}
+
+func (s *wlSeat) giodeDndMotion(x, y C.wl_fixed_t) {
+	if s.giodeDnd.offer == nil {
+		return
+	}
+	s.giodeDndMove(x, y)
+	giodeDrag(GiodeDragOver, s.giodeDnd.x, s.giodeDnd.y, "")
+}
+
+func (s *wlSeat) giodeDndLeave() {
+	d := s.giodeDnd
+	if d.offer == nil {
+		return
+	}
+	s.giodeDnd = giodeDnd{}
+	giodeDrag(GiodeDragLeave, d.x, d.y, "")
+	delete(s.offers, d.offer)
+	callbackDelete(unsafe.Pointer(d.offer))
+	C.wl_data_offer_destroy(d.offer)
+}
+
+// giodeDndDrop reads the dropped uri-list on its own goroutine: the
+// source writes it after Gio's event loop goes back to dispatching.
+func (s *wlSeat) giodeDndDrop() {
+	d := s.giodeDnd
+	if d.offer == nil {
+		return
+	}
+	s.giodeDnd = giodeDnd{}
+	delete(s.offers, d.offer)
+	r, w, err := os.Pipe()
+	if err != nil {
+		giodeDrag(GiodeDragLeave, d.x, d.y, "")
+		return
+	}
+	mime := C.CString(uriListMime)
+	C.wl_data_offer_receive(d.offer, mime, C.int(w.Fd()))
+	C.free(unsafe.Pointer(mime))
+	w.Close()
+	C.wl_display_flush(s.disp.disp)
+	finish := C.wl_proxy_get_version((*C.struct_wl_proxy)(unsafe.Pointer(d.offer))) >= 3 && d.action != 0
+	go func() {
+		defer r.Close()
+		r.SetReadDeadline(time.Now().Add(10 * time.Second))
+		data, _ := io.ReadAll(io.LimitReader(r, 16<<20))
+		giodeDrag(GiodeDragDrop, d.x, d.y, string(data))
+		if finish {
+			C.wl_data_offer_finish(d.offer)
+		}
+		callbackDelete(unsafe.Pointer(d.offer))
+		C.wl_data_offer_destroy(d.offer)
+		C.wl_display_flush(s.disp.disp)
+	}()
+}
+`,
+	},
+}
+
+// inject lets giode's MCP server deliver pointer and key events as the
+// platform would, for its ui_pointer and ui_key tools.
+var inject = []patch{
+	{
+		file: "app/giode_inject.go",
+		new: `// Added by giode's Gio patches: input from automation.
+
+package app
+
+import "gioui.org/io/event"
+
+// GiodeInject delivers e - a pointer.Event, key.Event or key.EditEvent,
+// in window pixels - to the window's input as if the platform had, on
+// the window's event thread, and waits for it to be handled. Don't
+// call it from the goroutine handling the window's events.
+func (w *Window) GiodeInject(e event.Event) {
+	if w.driver == nil {
+		return
+	}
+	w.Run(func() {
+		if w.driver == nil {
+			return
+		}
+		w.processEvent(e)
+		w.Invalidate()
+	})
+}
+`,
+	},
+}
+
 // Android is the set of patches for Android builds.
 var Android = append(append([]patch{}, androidPacing...), androidKeyRepeat...)
 
 // All is every patch, for builds of any target: the Android ones only
 // touch Android's files. Builds against it have the giode_gio tag (see
 // Tag).
-var All = append(append([]patch{}, Android...), underlay...)
+var All = append(append(append(append(append([]patch{}, Android...), underlay...), windowsMinimized...), fileDrag...), inject...)
 
 // Tag is the build tag of builds against patched Gio, which giode uses
 // to reach the patches' hooks.
 const Tag = "giode_gio"
+
+// Tag2 is the build tag of builds against patches with the underlay's
+// release and after-frame hooks, Linux file drags and input injection
+// (revision 5 on),
+// for giode versions that use them; builds have Tag too.
+const Tag2 = "giode_gio2"
 
 // ErrSkipped is returned, wrapped, when a module can't be patched:
 // it replaces or vendors Gio itself, or uses a workspace.

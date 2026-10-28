@@ -275,14 +275,23 @@ current user into `%LOCALAPPDATA%\Programs`, without an administrator prompt;
 ## Patched Gio
 
 `giode build` and `giode run` build against a copy of your Gio version with giode's
-patches, adding the `giode_gio` build tag:
+patches, adding the `giode_gio` and `giode_gio2` build tags:
 
-- **Underlay hook**, on every platform: what giode's `Config.Underlay` and
-  `Config.Renderer` use to draw video or 3D under the UI. The window calls the hook with
-  the frame's render target before drawing the UI over it without clearing, Gio's OpenGL
-  renderer saves and restores the GL state around its frames, and on Windows it can prefer
-  OpenGL ES (ANGLE) over Direct3D. `renderer = "opengl"` under `[app]` adds the `nometal`
-  tag to macOS and iOS builds, for Gio's OpenGL renderer there.
+- **Underlay hooks**, on every platform: what giode's `Config.Underlay`,
+  `Config.UnderlayRelease` and `Config.Renderer` use to draw video or 3D under the UI. The
+  window calls the hook with the frame's render target before drawing the UI over it
+  without clearing, calls another once the UI is drawn (the MCP screenshot reads the frame
+  back there) and a third before releasing its GPU resources; Gio's OpenGL renderer saves
+  and restores the GL state around its frames, and on Windows it can prefer OpenGL ES
+  (ANGLE) over Direct3D. `renderer = "opengl"` under `[app]` adds the `nometal` tag to
+  macOS and iOS builds, for Gio's OpenGL renderer there.
+- **File drags on Linux**: XDND on X11 and `wl_data_device`'s drag and drop on Wayland,
+  for `Config.OnFileDrop` and `OnFileDrag`. Gio's event loop reads those protocols'
+  messages, so they can't be handled outside it.
+- **Minimized windows on Windows**: Gio took a minimized window for a restored one, so
+  `WindowMinimized`, desktop `OnBackground` and the way back from them never came.
+- **Input from automation**: the MCP server's `ui_pointer` and `ui_key` deliver pointer
+  and key events to the window's input as the platform would.
 
 And two Android fixes Gio hasn't released:
 
