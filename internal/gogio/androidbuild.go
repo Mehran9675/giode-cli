@@ -55,6 +55,8 @@ type manifestData struct {
 	// ManifestXML and ApplicationXML come from Extras.
 	ManifestXML    string
 	ApplicationXML string
+	// ActivityXML goes inside the activity (Extras.AndroidActivity).
+	ActivityXML string
 }
 
 const (
@@ -121,6 +123,9 @@ func buildAndroid(tmpDir string, bi *buildInfo) error {
 		return err
 	}
 	var extraJars []string
+	deps := append([]string{}, androidDeps...)
+	pkgManifests = nil
+	defer func() { pkgManifests = nil }()
 	visitedPkgs := make(map[string]bool)
 	var visitPkg func(*packages.Package) error
 	visitPkg = func(p *packages.Package) error {
@@ -133,6 +138,18 @@ func buildAndroid(tmpDir string, bi *buildInfo) error {
 			return err
 		}
 		extraJars = append(extraJars, jars...)
+		d, err := readDeps(dir)
+		if err != nil {
+			return err
+		}
+		deps = append(deps, d...)
+		m, err := readPkgManifest(dir)
+		if err != nil {
+			return err
+		}
+		if m != nil {
+			pkgManifests = append(pkgManifests, m)
+		}
 		switch {
 		case p.PkgPath == "net":
 			perms = append(perms, "network")
@@ -152,6 +169,15 @@ func buildAndroid(tmpDir string, bi *buildInfo) error {
 		return err
 	}
 
+	for _, d := range deps {
+		if strings.HasPrefix(d, "com.google.firebase:") && !strings.Contains(extras.AndroidValues, `"google_app_id"`) {
+			return fmt.Errorf("%s needs the app's Firebase configuration: download google-services.json from the Firebase console and set android.google_services in giode.toml", d)
+		}
+	}
+	libs, err := resolveLibs(deps)
+	if err != nil {
+		return err
+	}
 	if err := compileAndroid(tmpDir, tools, bi); err != nil {
 		return err
 	}
@@ -173,7 +199,7 @@ func buildAndroid(tmpDir string, bi *buildInfo) error {
 			return fmt.Errorf("the specified output %q does not end in '.apk' or '.aab'", file)
 		}
 
-		if err := exeAndroid(tmpDir, tools, bi, extraJars, perms, isBundle); err != nil {
+		if err := exeAndroid(tmpDir, tools, bi, extraJars, libs, perms, isBundle); err != nil {
 			return err
 		}
 		if isBundle {
@@ -221,8 +247,14 @@ func compileAndroid(tmpDir string, tools *androidTools, bi *buildInfo) (err erro
 			return fmt.Errorf("failed to create %q: %v", archDir, err)
 		}
 		libFile := filepath.Join(archDir, "libgio.so")
+		// giode: with a symbols directory, build with symbols, keep a
+		// copy for the Play Console and strip the packaged library.
+		strip := "-w -s "
+		if symbolsDir != "" {
+			strip = ""
+		}
 		cmd := goCommand("build",
-			"-ldflags=-w -s -extldflags \"-Wl,-z,max-page-size=65536\" "+bi.ldflags,
+			"-ldflags="+strip+"-extldflags \"-Wl,-z,max-page-size=65536\" "+bi.ldflags,
 			"-buildmode=c-shared",
 			"-tags", bi.tags,
 			"-o", libFile,
@@ -237,9 +269,15 @@ func compileAndroid(tmpDir string, tools *androidTools, bi *buildInfo) (err erro
 			"CC="+clang,
 			"CXX="+clang+"++",
 		)
+		jniArch := arch.jniArch
 		builds.Go(func() error {
-			_, err := runCmd(cmd)
-			return err
+			if _, err := runCmd(cmd); err != nil {
+				return err
+			}
+			if symbolsDir == "" {
+				return nil
+			}
+			return splitSymbols(tcRoot, libFile, filepath.Join(symbolsDir, jniArch, "libgio.so"))
 		})
 	}
 	appDir, err := runCmd(goCommand("list", "-tags", bi.tags, "-f", "{{.Dir}}", "gioui.org/app/"))
@@ -345,7 +383,16 @@ func archiveAndroid(tmpDir string, bi *buildInfo, perms []string) (err error) {
 	return aarw.Close()
 }
 
-func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, perms []string, isBundle bool) (err error) {
+func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, libPaths, perms []string, isBundle bool) (err error) {
+	aapt2 := filepath.Join(tools.buildtools, "aapt2")
+	libs, libJars, err := unpackLibs(libPaths, filepath.Join(tmpDir, "libs"), aapt2)
+	if err != nil {
+		return err
+	}
+	for _, m := range pkgManifests {
+		libs = append(libs, aarLib{manifest: m})
+	}
+	merged := mergeManifests(libs, bi.appID, extras.AndroidApplication)
 	classes := filepath.Join(tmpDir, "classes")
 	var classFiles []string
 	err = filepath.Walk(classes, func(path string, f os.FileInfo, err error) error {
@@ -358,11 +405,12 @@ func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, pe
 		return nil
 	})
 	classFiles = append(classFiles, extraJars...)
+	classFiles = append(classFiles, libJars...)
 	dexDir := filepath.Join(tmpDir, "apk")
 	if err := os.MkdirAll(dexDir, 0o755); err != nil {
 		return err
 	}
-	minSDK := max(bi.minsdk, 16)
+	minSDK := max(bi.minsdk, 16, merged.minSDK)
 	// https://developer.android.com/distribute/best-practices/develop/target-sdk
 	targetSDK := 35
 	if bi.targetsdk > 0 {
@@ -371,23 +419,6 @@ func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, pe
 	if minSDK > targetSDK {
 		targetSDK = minSDK
 	}
-	if len(classFiles) > 0 {
-		d8 := exec.Command(
-			filepath.Join(tools.buildtools, "d8"),
-			"--lib", tools.androidjar,
-			"--output", dexDir,
-			"--min-api", strconv.Itoa(minSDK),
-		)
-		d8.Args = append(d8.Args, classFiles...)
-		if _, err := runCmd(d8); err != nil {
-			major, minor, ok := determineJDKVersion()
-			if ok && (major != 1 || minor != 8) {
-				return fmt.Errorf("unsupported JDK version %d.%d, expected 1.8\nd8 error: %v", major, minor, err)
-			}
-			return err
-		}
-	}
-
 	// Compile resources.
 	resDir := filepath.Join(tmpDir, "res")
 	valDir := filepath.Join(resDir, "values")
@@ -432,8 +463,12 @@ func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, pe
 	if err != nil {
 		return err
 	}
+	if extras.AndroidValues != "" {
+		if err := os.WriteFile(filepath.Join(valDir, "giode_values.xml"), []byte(extras.AndroidValues), 0o660); err != nil {
+			return err
+		}
+	}
 	resZip := filepath.Join(tmpDir, "resources.zip")
-	aapt2 := filepath.Join(tools.buildtools, "aapt2")
 	_, err = runCmd(exec.Command(
 		aapt2,
 		"compile",
@@ -446,6 +481,7 @@ func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, pe
 	// Link APK.
 	permissions, features := getPermissions(perms)
 	permissions = addPermissions(permissions, extras.AndroidPermissions)
+	permissions = addPermissions(permissions, merged.permissions)
 	appName := UppercaseName(bi.name)
 	manifestSrc := manifestData{
 		AppID:          bi.appID,
@@ -458,8 +494,9 @@ func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, pe
 		AppName:        appName,
 		Schemes:        bi.schemes,
 		PackageQueries: bi.packageQueries,
-		ManifestXML:    extras.AndroidManifest,
-		ApplicationXML: extras.AndroidApplication,
+		ManifestXML:    extras.AndroidManifest + merged.manifest,
+		ApplicationXML: merged.application,
+		ActivityXML:    extras.AndroidActivity,
 	}
 	manifestXML, err := androidManifest(manifestSrc)
 	if err != nil {
@@ -481,10 +518,48 @@ func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, pe
 	if isBundle {
 		args = append(args, "--proto-format")
 	}
-	args = append(args, resZip)
+	// giode: libraries' resources are linked under the app's (later
+	// overlays win), with R classes generated for their packages.
+	libZips, libPkgs := libResources(libs)
+	genDir := filepath.Join(tmpDir, "gen")
+	if len(libZips) > 0 {
+		args = append(args, "--auto-add-overlay", "--java", genDir, "--extra-packages", strings.Join(libPkgs, ":"))
+		// The first library is the lowest priority base.
+		args = append(args, libZips[len(libZips)-1])
+		for i := len(libZips) - 2; i >= 0; i-- {
+			args = append(args, "-R", libZips[i])
+		}
+		args = append(args, "-R", resZip)
+	} else {
+		args = append(args, resZip)
+	}
 
 	if _, err := runCmd(exec.Command(aapt2, args...)); err != nil {
 		return err
+	}
+	if len(libZips) > 0 {
+		rClasses, err := compileR(genDir, filepath.Join(tmpDir, "rclasses"))
+		if err != nil {
+			return err
+		}
+		classFiles = append(classFiles, rClasses...)
+	}
+
+	if len(classFiles) > 0 {
+		d8 := exec.Command(
+			filepath.Join(tools.buildtools, "d8"),
+			"--lib", tools.androidjar,
+			"--output", dexDir,
+			"--min-api", strconv.Itoa(minSDK),
+		)
+		d8.Args = append(d8.Args, classFiles...)
+		if _, err := runCmd(d8); err != nil {
+			major, minor, ok := determineJDKVersion()
+			if ok && (major != 1 || minor != 8) {
+				return fmt.Errorf("unsupported JDK version %d.%d, expected 1.8\nd8 error: %v", major, minor, err)
+			}
+			return err
+		}
 	}
 
 	// The Go standard library archive/zip doesn't support appending to zip
@@ -567,13 +642,62 @@ func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, pe
 		}
 	}
 
-	// Append classes.dex.
+	// Append classes.dex, and the classes2.dex... of a multidex app.
 	if len(classFiles) > 0 {
-		classesFolder := "classes.dex"
-		if isBundle {
-			classesFolder = "dex/classes.dex"
+		dexes, err := filepath.Glob(filepath.Join(dexDir, "classes*.dex"))
+		if err != nil {
+			return err
 		}
-		if err := appendToZip(classesFolder, filepath.Join(dexDir, "classes.dex")); err != nil {
+		for _, dex := range dexes {
+			classesFolder := filepath.Base(dex)
+			if isBundle {
+				classesFolder = "dex/" + classesFolder
+			}
+			if err := appendToZip(classesFolder, dex); err != nil {
+				return err
+			}
+		}
+	}
+
+	// giode: libraries' native libraries, for the app's ABIs, and
+	// assets.
+	abis := map[string]bool{}
+	for _, a := range bi.archs {
+		abis[allArchs[a].jniArch] = true
+	}
+	added := map[string]bool{}
+	for _, l := range libs {
+		for abi, sos := range l.jni {
+			if !abis[abi] {
+				continue
+			}
+			for _, so := range sos {
+				name := "lib/" + abi + "/" + filepath.Base(so)
+				if added[name] {
+					continue
+				}
+				added[name] = true
+				if err := appendToZip(name, so); err != nil {
+					return err
+				}
+			}
+		}
+		if l.assets == "" {
+			continue
+		}
+		err := filepath.Walk(l.assets, func(p string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return err
+			}
+			rel, _ := filepath.Rel(l.assets, p)
+			name := "assets/" + filepath.ToSlash(rel)
+			if added[name] {
+				return nil
+			}
+			added[name] = true
+			return appendToZip(name, p)
+		})
+		if err != nil {
 			return err
 		}
 	}
@@ -1089,6 +1213,7 @@ var apkManifest = template.Must(template.New("manifest").Parse(
 				<data android:scheme="{{.}}"></data>
 			</intent-filter>
 			{{end}}
+{{.ActivityXML}}
 		</activity>
 {{.ApplicationXML}}
 	</application>
@@ -1101,4 +1226,25 @@ func androidManifest(d manifestData) ([]byte, error) {
 		return nil, err
 	}
 	return b.Bytes(), nil
+}
+
+// symbolsDir, when set, receives each ABI's unstripped library
+// (Options.SymbolsDir).
+var symbolsDir string
+
+// splitSymbols copies the unstripped library to sym and strips lib with
+// the NDK's llvm-strip.
+func splitSymbols(tcRoot, lib, sym string) error {
+	if err := os.MkdirAll(filepath.Dir(sym), 0o755); err != nil {
+		return err
+	}
+	if err := copyFile(sym, lib); err != nil {
+		return err
+	}
+	stripTool := filepath.Join(tcRoot, "bin", "llvm-strip")
+	if runtime.GOOS == "windows" {
+		stripTool += ".exe"
+	}
+	_, err := runCmd(exec.Command(stripTool, "--strip-all", lib))
+	return err
 }

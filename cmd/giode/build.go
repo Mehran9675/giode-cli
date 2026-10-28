@@ -18,6 +18,7 @@ import (
 	"github.com/mehran9675/giode-cli/internal/giopatch"
 	"github.com/mehran9675/giode-cli/internal/gogio"
 	"github.com/mehran9675/giode-cli/internal/installer"
+	"github.com/mehran9675/giode-cli/internal/pwa"
 	"github.com/mehran9675/giode-cli/internal/sign"
 )
 
@@ -30,12 +31,21 @@ Builds the app in giode.toml for each target, into dist/<platform>:
 	aab       an Android App Bundle for Google Play (dist/android/<App>.aab)
 	ios       an IPA for devices, signed with ios.profile (macOS only)
 	ios-sim   an app for the iOS simulator (macOS only)
-	macos     a macOS app bundle (macOS only)
+	macos     a universal (Apple silicon and Intel) macOS app bundle (macOS only)
+	dmg       the app in a disk image with a link to Applications (macOS only)
 	windows   a Windows executable with icon and manifest (from any OS)
 	windows-installer
 	          a Windows setup program (<App>-<version>-setup.exe) with Start
 	          menu shortcut and uninstaller, made with NSIS (from any OS)
+	msix      an MSIX package for the Microsoft Store and App Installer
+	          (from any OS; installable once signed)
+	winget    the setup program and winget manifests for it (from any OS)
 	linux     a Linux executable with a .desktop file and icon (Linux only)
+	deb, rpm  Debian and RPM packages installing it under /usr, with menu
+	          entry, icons and AppStream metadata (Linux only)
+	appimage  an AppImage, with appimagetool (Linux only)
+	flatpak   a Flatpak bundle with flatpak-builder, or its manifest
+	          without it (Linux only)
 	web       a WebAssembly site (dist/web)
 	desktop   this computer's platform
 	all       every target this computer can build
@@ -111,11 +121,13 @@ func cmdBuild(args []string) error {
 }
 
 // targetNames are the targets build accepts, besides desktop and all.
-var targetNames = []string{"android", "aab", "ios", "ios-sim", "macos", "windows", "windows-installer", "linux", "web"}
+var targetNames = []string{"android", "aab", "ios", "ios-sim", "macos", "dmg", "windows", "windows-installer", "msix", "winget", "linux", "deb", "rpm", "appimage", "flatpak", "web"}
 
 // targetAliases are short and alternative target names.
 var targetAliases = map[string]string{
 	"apk":           "android",
+	"debian":        "deb",
+	"AppImage":      "appimage",
 	"bundle":        "aab",
 	"mac":           "macos",
 	"osx":           "macos",
@@ -184,11 +196,25 @@ func expandTargets(ts []string) []string {
 
 // buildTarget builds one target and returns the output path.
 func buildTarget(c *config.Config, target string, o buildOpts) (string, error) {
+	if c.App.Licenses != "" && !licensesWritten[c.Dir] {
+		licensesWritten[c.Dir] = true
+		if _, err := writeLicenses(c, c.Path(c.App.Licenses)); err != nil {
+			return "", fmt.Errorf("app.licenses: %w", err)
+		}
+	}
 	switch target {
 	case "linux":
 		return buildLinux(c, o)
 	case "windows-installer":
 		return buildWindowsInstaller(c, o)
+	case "deb", "rpm", "appimage", "flatpak":
+		return buildLinuxPackage(c, target, o)
+	case "msix":
+		return buildMSIX(c, o)
+	case "dmg":
+		return buildDMG(c, o)
+	case "winget":
+		return buildWinget(c, o)
 	case "android", "aab", "ios", "ios-sim", "macos", "windows", "web":
 	default:
 		return "", fmt.Errorf("unknown target %q; targets: %s, desktop, all", target, strings.Join(targetNames, ", "))
@@ -221,8 +247,34 @@ func buildTarget(c *config.Config, target string, o buildOpts) (string, error) {
 			return "", fmt.Errorf("patching Gio: %w (set android.gio_patches = false to skip)", err)
 		}
 	}
+	symbols := ""
+	if (target == "android" || target == "aab") && o.release {
+		// Release builds keep the native libraries' symbols for the Play
+		// Console, which symbolizes crash reports with them.
+		if symbols, err = os.MkdirTemp("", "giode-symbols-"); err != nil {
+			return "", err
+		}
+		defer os.RemoveAll(symbols)
+		g.SymbolsDir = symbols
+	}
 	if err := gogio.Build(pkgPath(c), g); err != nil {
 		return "", err
+	}
+	if symbols != "" {
+		zip := filepath.Join(filepath.Dir(g.Output), "native-debug-symbols.zip")
+		if err := zipTree(symbols, zip); err != nil {
+			return "", fmt.Errorf("native debug symbols: %w", err)
+		}
+		fmt.Printf("  %s (upload to the Play Console with the bundle)\n", relPath(zip))
+	}
+	if target == "web" && (c.Web.PWA == nil || *c.Web.PWA) {
+		err := pwa.Make(pwa.App{
+			Name: c.App.Name, ShortName: c.Web.ShortName, Description: c.App.Description, ID: c.App.ID,
+			Icon: c.Path(c.App.Icon), ThemeColor: c.Web.ThemeColor, BackgroundColor: c.Web.BackgroundColor,
+		}, g.Output)
+		if err != nil {
+			return "", fmt.Errorf("making the PWA: %w", err)
+		}
 	}
 	if target == "windows" && o.release {
 		if err := signWindows(c, g.Output); err != nil {
@@ -268,6 +320,9 @@ func buildWindowsInstaller(c *config.Config, o buildOpts) (string, error) {
 		PerMachine: inst.PerMachine, DesktopShortcut: inst.DesktopShortcut,
 		Output: out, Verbose: verbose,
 	}
+	for _, v := range c.WindowsVerbs() {
+		opts.ContextMenu = append(opts.ContextMenu, installer.Verb{Key: v.Key, Label: v.Label, ID: v.ID, Arg: v.Arg})
+	}
 	if err := installer.Build(opts); err != nil {
 		return "", err
 	}
@@ -286,7 +341,7 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 		Name:          binaryName(c),
 		Version:       c.GogioVersion(),
 		Tags:          c.App.Tags,
-		Ldflags:       c.App.Ldflags,
+		Ldflags:       desktopLdflags(c, target),
 		Schemes:       c.App.Schemes,
 		Arch:          o.arch,
 		PrintCommands: verbose,
@@ -312,7 +367,16 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 			g.Arch = strings.Join(c.Android.Arch, ",")
 		}
 		perms, manifest, app := c.AndroidExtras()
-		g.Extras = gogio.Extras{AndroidPermissions: perms, AndroidManifest: manifest, AndroidApplication: app}
+		g.Extras = gogio.Extras{AndroidPermissions: perms, AndroidManifest: manifest, AndroidApplication: app, AndroidActivity: c.AndroidActivityXML()}
+		values, err := c.GoogleServicesXML()
+		if err != nil {
+			return g, err
+		}
+		g.Extras.AndroidValues = values
+		g.AndroidDependencies, g.AndroidRepos = c.Android.Dependencies, c.Android.Repositories
+		for _, l := range c.Android.Libraries {
+			g.AndroidLibs = append(g.AndroidLibs, c.Path(l))
+		}
 		if o.release {
 			if c.Android.Keystore == "" {
 				return g, errors.New("-release needs android.keystore in giode.toml (giode keystore creates one)")
@@ -345,7 +409,11 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 		if err != nil {
 			return g, err
 		}
-		g.Extras = gogio.Extras{InfoPlist: plist}
+		privacy, err := c.PrivacyManifest()
+		if err != nil {
+			return g, err
+		}
+		g.Extras = gogio.Extras{InfoPlist: plist, PrivacyManifest: privacy, Entitlements: c.IOSEntitlements()}
 		platform, file = "ios", binaryName(c)+".ipa"
 		if target == "ios-sim" {
 			// gogio builds simulator apps for amd64; Xcode runs them on
@@ -370,7 +438,11 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 		if err != nil {
 			return g, err
 		}
-		g.Extras = gogio.Extras{InfoPlist: plist}
+		privacy, err := c.PrivacyManifest()
+		if err != nil {
+			return g, err
+		}
+		g.Extras = gogio.Extras{InfoPlist: plist, PrivacyManifest: privacy, Entitlements: c.MacOSEntitlements()}
 		if o.release {
 			switch {
 			case c.MacOS.Profile != "":
@@ -459,7 +531,7 @@ func buildLinux(c *config.Config, o buildOpts) (string, error) {
 		bin, _ = filepath.Abs(o.output)
 		d = filepath.Dir(bin)
 	}
-	ldflags := strings.TrimSpace("-s -w -X gioui.org/app.ID=" + c.App.ID + " " + c.App.Ldflags)
+	ldflags := strings.TrimSpace("-s -w -X gioui.org/app.ID=" + c.App.ID + " " + desktopLdflags(c, "linux"))
 	args := []string{"build", "-trimpath", "-ldflags", ldflags, "-o", bin}
 	if c.App.Tags != "" {
 		args = append(args, "-tags", c.App.Tags)
@@ -480,8 +552,15 @@ func buildLinux(c *config.Config, o buildOpts) (string, error) {
 	if len(c.Linux.Categories) > 0 {
 		cats = strings.Join(c.Linux.Categories, ";") + ";"
 	}
-	desktop := fmt.Sprintf("[Desktop Entry]\nType=Application\nName=%s\nExec=%s\nIcon=%s\nCategories=%s\nTerminal=false\n",
+	desktop := fmt.Sprintf("[Desktop Entry]\nType=Application\nName=%s\nExec=%s %%U\nIcon=%s\nCategories=%s\nTerminal=false\n",
 		c.App.Name, filepath.Base(bin), c.App.ID, cats)
+	if len(c.App.Schemes) > 0 {
+		var types []string
+		for _, s := range c.App.Schemes {
+			types = append(types, "x-scheme-handler/"+s)
+		}
+		desktop += "MimeType=" + strings.Join(types, ";") + ";\n"
+	}
 	if err := os.WriteFile(filepath.Join(d, c.App.ID+".desktop"), []byte(desktop), 0o644); err != nil {
 		return "", err
 	}
@@ -510,3 +589,18 @@ func writeLinuxIcon(src, dst string) error {
 	}
 	return err
 }
+
+// desktopLdflags returns the linker flags for a target: app.ldflags,
+// plus on desktops the context actions and update settings.
+func desktopLdflags(c *config.Config, target string) string {
+	flags := c.App.Ldflags
+	switch target {
+	case "windows", "macos", "linux":
+		flags += " " + c.ContextActionsLdflag() + " " + c.UpdateLdflags()
+	}
+	return strings.Join(strings.Fields(flags), " ")
+}
+
+// licensesWritten records projects whose app.licenses this run already
+// refreshed.
+var licensesWritten = map[string]bool{}

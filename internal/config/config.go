@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -27,6 +28,16 @@ type Config struct {
 	Windows Windows `toml:"windows"`
 	Linux   Linux   `toml:"linux"`
 	Web     Web     `toml:"web"`
+
+	// Update configures self-updates of desktop builds.
+	Update Update `toml:"update"`
+
+	// Privacy is the privacy manifest for iOS and macOS.
+	Privacy Privacy `toml:"privacy"`
+
+	// ContextActions add entries to the file manager's right-click menu
+	// that open the app with the chosen paths.
+	ContextActions []ContextAction `toml:"context_actions"`
 
 	// Dir is the directory holding giode.toml; paths in it are
 	// relative to Dir.
@@ -51,6 +62,11 @@ type App struct {
 	Package string `toml:"package"`
 	// Schemes are URL schemes the app opens (myapp://...).
 	Schemes []string `toml:"schemes"`
+	// Links are https URLs the app opens instead of the browser -
+	// universal links on iOS and macOS, App Links on Android - like
+	// https://example.com/app/*. giode links writes the files the site
+	// must serve to prove the app may.
+	Links []string `toml:"links"`
 	// Publisher is who makes the app, shown by installers and in
 	// Windows' list of installed apps; Description a one-line summary;
 	// Website the app's home page.
@@ -60,6 +76,9 @@ type App struct {
 	// Tags are Go build tags; Ldflags extra linker flags.
 	Tags    string `toml:"tags"`
 	Ldflags string `toml:"ldflags"`
+	// Licenses is a JSON file every build refreshes with the licenses of
+	// the app's modules (see giode licenses).
+	Licenses string `toml:"licenses"`
 	// Output is where builds go, "dist" by default.
 	Output string `toml:"output"`
 }
@@ -101,6 +120,23 @@ type Android struct {
 	// Android debug key.
 	Keystore        string `toml:"keystore"`
 	KeystorePassEnv string `toml:"keystore_pass_env"`
+	// Fingerprints are SHA-256 fingerprints of more signing
+	// certificates allowed to open app.links: Play App Signing's, from
+	// the Play Console. The keystore's is added by giode links.
+	Fingerprints []string `toml:"fingerprints"`
+	// Dependencies are Android libraries from Maven repositories
+	// (group:artifact:version), built in with their own dependencies:
+	// their classes, resources, manifest entries and native libraries.
+	// giode packages that need one (push, billing, review) add theirs.
+	Dependencies []string `toml:"dependencies"`
+	// Repositories replace the Maven repositories searched (Google's
+	// and Maven Central).
+	Repositories []string `toml:"repositories"`
+	// Libraries are local .aar and .jar files built in.
+	Libraries []string `toml:"libraries"`
+	// GoogleServices is the google-services.json file from the Firebase
+	// console, needed for push notifications (giode/push).
+	GoogleServices string `toml:"google_services"`
 }
 
 // IOS configures iOS builds.
@@ -117,6 +153,14 @@ type IOS struct {
 	Plist map[string]any `toml:"plist"`
 	// Profile is the provisioning profile signing device builds.
 	Profile string `toml:"profile"`
+	// TeamID is the Apple developer team ID, for universal links'
+	// apple-app-site-association file.
+	TeamID string `toml:"team_id"`
+	// Push enables push notifications (giode/push): "development" or
+	// "production", the APNs environment of the aps-environment
+	// entitlement, which the provisioning profile must allow. It also
+	// lets silent pushes wake the app (UIBackgroundModes).
+	Push string `toml:"push"`
 }
 
 // MacOS configures macOS app bundles.
@@ -134,6 +178,9 @@ type MacOS struct {
 	NotaryID      string `toml:"notary_id"`
 	NotaryTeamID  string `toml:"notary_team_id"`
 	NotaryPassEnv string `toml:"notary_pass_env"`
+	// Push enables push notifications, as ios.push. It needs Profile:
+	// macOS refuses the entitlement without a provisioning profile.
+	Push string `toml:"push"`
 }
 
 // Windows configures Windows builds.
@@ -142,6 +189,33 @@ type Windows struct {
 	Arch      string           `toml:"arch"`
 	Signing   WindowsSigning   `toml:"signing"`
 	Installer WindowsInstaller `toml:"installer"`
+	MSIX      WindowsMSIX      `toml:"msix"`
+	Winget    WindowsWinget    `toml:"winget"`
+}
+
+// WindowsMSIX configures MSIX packages (giode build msix), for the
+// Microsoft Store and App Installer.
+type WindowsMSIX struct {
+	// Publisher is the signing certificate's subject ("CN=Example
+	// Ltd"), or the publisher ID Partner Center gives for the Store.
+	Publisher string `toml:"publisher"`
+	// IdentityName is the package name; the Store reserves it. The app
+	// ID by default.
+	IdentityName string `toml:"identity_name"`
+	// PublisherDisplayName is the publisher shown; app.publisher by
+	// default.
+	PublisherDisplayName string `toml:"publisher_display_name"`
+}
+
+// WindowsWinget configures winget manifests (giode build winget).
+type WindowsWinget struct {
+	// ID is the package identifier, Publisher.App.
+	ID string `toml:"id"`
+	// InstallerURL is where users download the setup program; {version}
+	// is replaced with the version.
+	InstallerURL string `toml:"installer_url"`
+	// License is the app's license, as shown by winget.
+	License string `toml:"license"`
 }
 
 // WindowsSigning signs release builds and installers with an
@@ -181,16 +255,60 @@ type WindowsInstaller struct {
 	DesktopShortcut bool `toml:"desktop_shortcut"`
 }
 
+// Update configures the giode update package for desktop builds.
+type Update struct {
+	// FeedURL is where the app looks for updates: the feed.json giode
+	// release writes, uploaded.
+	FeedURL string `toml:"feed_url"`
+	// PublicKey is the base64 Ed25519 key the app checks the feed with
+	// (giode update-key writes it).
+	PublicKey string `toml:"public_key"`
+	// PrivateKey is the file with the private key giode release signs
+	// with, update.key by default; $GIODE_UPDATE_KEY overrides it with
+	// the key itself (for CI).
+	PrivateKey string `toml:"private_key"`
+}
+
+// UpdateLdflags returns the linker flags configuring the update
+// package, or "" without [update].
+func (c *Config) UpdateLdflags() string {
+	if c.Update.FeedURL == "" || c.Update.PublicKey == "" {
+		return ""
+	}
+	const pkg = "github.com/mehran9675/giode/update."
+	return "-X " + pkg + "defaultFeedURL=" + c.Update.FeedURL + " -X " + pkg + "defaultPublicKey=" + c.Update.PublicKey +
+		" -X " + pkg + "defaultVersion=" + c.App.Version
+}
+
 // Linux configures Linux builds.
 type Linux struct {
 	// Categories go in the .desktop file (freedesktop menu categories).
 	Categories []string `toml:"categories"`
+	// Description is the long description packages and software
+	// centers show (app.description is the summary).
+	Description string `toml:"description"`
+	// Maintainer is "Name <email>" for .deb and .rpm metadata.
+	Maintainer string `toml:"maintainer"`
+	// License is the app's SPDX license expression.
+	License string `toml:"license"`
+	// FlatpakPermissions are Flatpak finish-args, replacing the default
+	// display, GPU, network and sound access.
+	FlatpakPermissions []string `toml:"flatpak_permissions"`
 }
 
 // Web configures WebAssembly builds.
 type Web struct {
 	// Port is where giode run web serves the app, 8080 by default.
 	Port int `toml:"port"`
+	// PWA makes the site an installable progressive web app that works
+	// offline: a manifest, icons and a service worker. True by default.
+	PWA *bool `toml:"pwa"`
+	// ShortName is the name under the home screen icon (app.name by
+	// default); ThemeColor and BackgroundColor CSS colors for the
+	// title bar and splash screen.
+	ShortName       string `toml:"short_name"`
+	ThemeColor      string `toml:"theme_color"`
+	BackgroundColor string `toml:"background_color"`
 }
 
 // Find looks for giode.toml in dir and its parents.
@@ -227,6 +345,18 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("%s: unknown settings: %s", path, strings.Join(keys, ", "))
 	}
 	c.Dir = filepath.Dir(path)
+	// CI sets the version from a tag and the build number from its run
+	// counter.
+	if v := strings.TrimPrefix(os.Getenv("GIODE_VERSION"), "v"); v != "" {
+		c.App.Version = v
+	}
+	if b := os.Getenv("GIODE_BUILD"); b != "" {
+		n, err := strconv.Atoi(b)
+		if err != nil {
+			return nil, fmt.Errorf("$GIODE_BUILD %q isn't a number", b)
+		}
+		c.App.Build = n
+	}
 	c.setDefaults()
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
@@ -287,6 +417,11 @@ func (c *Config) Validate() error {
 	if c.App.Build < 1 {
 		errs = append(errs, fmt.Errorf("app.build must be at least 1"))
 	}
+	errs = append(errs, c.validateContextActions()...)
+	if _, err := c.ParseLinks(); err != nil {
+		errs = append(errs, err)
+	}
+	errs = append(errs, c.Privacy.validate()...)
 	if cmd := c.Windows.Signing.Command; len(cmd) > 0 && !strings.Contains(strings.Join(cmd, " "), "{file}") {
 		errs = append(errs, errors.New("windows.signing.command must contain {file}, where the file to sign goes"))
 	}
@@ -305,6 +440,16 @@ func (c *Config) Validate() error {
 	for _, p := range []map[string]any{c.IOS.Plist, c.MacOS.Plist} {
 		if _, err := plistXML(p); err != nil {
 			errs = append(errs, err)
+		}
+	}
+	for k, v := range map[string]string{"ios.push": c.IOS.Push, "macos.push": c.MacOS.Push} {
+		if v != "" && v != "development" && v != "production" {
+			errs = append(errs, fmt.Errorf("%s is %q; use development or production", k, v))
+		}
+	}
+	for _, d := range c.Android.Dependencies {
+		if p := strings.Split(d, ":"); len(p) != 3 || p[0] == "" || p[1] == "" || p[2] == "" {
+			errs = append(errs, fmt.Errorf("android.dependencies entry %q isn't group:artifact:version", d))
 		}
 	}
 	return errors.Join(errs...)

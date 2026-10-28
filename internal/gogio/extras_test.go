@@ -66,3 +66,28 @@ func TestWithPlistExtras(t *testing.T) {
 		t.Error("extras added more than once")
 	}
 }
+
+func TestAndroidManifest_ActivityXML(t *testing.T) {
+	out, err := androidManifest(manifestData{
+		AppID: "com.example.app", Version: Semver{1, 0, 0, 1}, MinSDK: 21, TargetSDK: 35, AppName: "App",
+		ActivityXML: `<intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW"/><data android:scheme="https" android:host="example.com"/></intent-filter>`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		App struct {
+			Activity struct {
+				Filters []struct {
+					AutoVerify string `xml:"autoVerify,attr"`
+				} `xml:"intent-filter"`
+			} `xml:"activity"`
+		} `xml:"application"`
+	}
+	if err := xml.Unmarshal(out, &m); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if n := len(m.App.Activity.Filters); n != 2 || m.App.Activity.Filters[1].AutoVerify != "true" {
+		t.Errorf("activity has %d intent filters (%+v), want the launcher's and the App Link's", n, m.App.Activity.Filters)
+	}
+}

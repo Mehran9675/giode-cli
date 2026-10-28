@@ -89,10 +89,21 @@ type Options struct {
 	Args []string
 	// Extras adds what gogio's templates can't express.
 	Extras Extras
+	// SymbolsDir, when set, receives the unstripped native libraries of
+	// Android builds, by ABI, for the Play Console's crash reports.
+	SymbolsDir string
 	// ModFile, when set, is passed as -modfile to the go build and go
 	// list commands run in the app's module - and only to those, since
 	// go refuses the flag outside module mode.
 	ModFile string
+	// AndroidLibs are local .aar and .jar files built into Android
+	// apps; AndroidDependencies are Maven coordinates
+	// (group:artifact:version) resolved, with their dependencies, from
+	// AndroidRepos (maven.DefaultRepos when empty) into MavenCache.
+	AndroidLibs         []string
+	AndroidDependencies []string
+	AndroidRepos        []string
+	MavenCache          string
 }
 
 // modFile is Options.ModFile for the build in progress.
@@ -120,6 +131,19 @@ type Extras struct {
 	// InfoPlist is XML key/value pairs added to the iOS, tvOS and
 	// macOS Info.plist dictionary.
 	InfoPlist string
+	// PrivacyManifest is the PrivacyInfo.xcprivacy file written into
+	// iOS and macOS app bundles.
+	PrivacyManifest []byte
+	// AndroidActivity is XML added inside the app's <activity>: intent
+	// filters for App Links.
+	AndroidActivity string
+	// Entitlements replace or add entitlements of iOS (and macOS
+	// provisioning profile) signing: strings, booleans and lists of
+	// strings, by key.
+	Entitlements map[string]any
+	// AndroidValues is a res/values resource file added to Android
+	// apps: Firebase's google-services strings.
+	AndroidValues string
 }
 
 // Build builds and packages the Go package pkg as gogio would.
@@ -132,8 +156,12 @@ func Build(pkg string, o Options) error {
 	*notaryID, *notaryPass, *notaryTeamID = o.NotaryID, o.NotaryPass, o.NotaryTeamID
 	*schemes, *pkgQueries = strings.Join(o.Schemes, ","), strings.Join(o.Queries, ",")
 	appArgs, extras = o.Args, o.Extras
-	modFile = o.ModFile
-	defer func() { modFile = "" }()
+	modFile, symbolsDir = o.ModFile, o.SymbolsDir
+	androidLibs, androidDeps, androidRepos, mavenCache = o.AndroidLibs, o.AndroidDependencies, o.AndroidRepos, o.MavenCache
+	defer func() {
+		modFile, symbolsDir = "", ""
+		androidLibs, androidDeps, androidRepos, mavenCache = nil, nil, nil, ""
+	}()
 	if *buildMode == "" {
 		*buildMode = "exe"
 	}

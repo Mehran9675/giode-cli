@@ -52,13 +52,19 @@ target needs.
 | --- | --- |
 | `giode new [-id com.example.app] <dir>` | Creates a project: a counter app in `main.go`, `go.mod` with the latest giode, `giode.toml` with the settings to fill in, placeholder assets (`assets/icon.png`, `assets/README.md`), `.gitignore` and a README. |
 | `giode init` | Adds `giode.toml` to an existing Go module. |
-| `giode build <target>...` | Builds into `dist/<platform>`. Targets: `android` (APK), `aab` (Play bundle), `ios` (IPA), `ios-sim`, `macos`, `windows`, `windows-installer` (setup program), `linux`, `web`, `desktop` (this computer) and `all` (everything this computer can build). `-release` signs with your certificates. |
+| `giode build <target>...` | Builds into `dist/<platform>`. Targets: `android` (APK), `aab` (Play bundle), `ios` (IPA), `ios-sim`, `macos` (universal), `dmg`, `windows`, `windows-installer` (setup program), `msix`, `winget`, `linux`, `deb`, `rpm`, `appimage`, `flatpak`, `web`, `desktop` (this computer) and `all` (everything this computer can build). `-release` signs with your certificates. |
 | `giode run [target]` | Builds for a target and runs it: `desktop` (default, with `go run`), `linux`, `windows` (Wine off Windows), `windows-installer`, `macos`, `android` (builds the device's architecture, installs, launches, follows the log), `ios-sim`, `web` (serves `dist/web`). `-mcp` starts giode's MCP server so an AI agent can drive the app. |
 | `giode devices` | Lists Android devices and booted iOS simulators. |
 | `giode doctor` | Checks Go, the Android SDK, build tools, platform, NDK and JDK, Xcode, and Gio's Linux libraries, with install commands for what's missing. |
 | `giode keystore` | Creates an Android release keystore and points `giode.toml` at it. |
 | `giode cert` | Creates a self-signed Windows code signing certificate for testing and points `giode.toml` at it. |
 | `giode sign <file>...` | Signs Windows executables and installers with the configured certificate. |
+| `giode links` | Writes `.well-known/assetlinks.json` and `apple-app-site-association` for each host in `app.links`, to upload to your site (fingerprints from `android.keystore` and `android.fingerprints`, team from `ios.team_id`). |
+| `giode update-key` | Creates the Ed25519 key pair signing update feeds: the private key in `update.key` (added to `.gitignore`), the public key in `[update]`. |
+| `giode release [targets]` | Builds desktop targets and writes `dist/update/`: the downloads, `feed.json` and its signature, for apps using the giode `update` package. |
+| `giode bump [major\|minor\|patch\|build]` | Raises `app.version` and always `app.build`. In CI, `$GIODE_VERSION` (a tag like `v1.4.2`) and `$GIODE_BUILD` override both. |
+| `giode ci` | Writes `.github/workflows/release.yml`: on a version tag, builds Linux, Windows, Android and macOS packages, signed with the repository's secrets when present, and attaches them to a GitHub release. |
+| `giode licenses` | Writes the licenses of the app's Go modules (on any platform) and Go's to `assets/licenses.json` (or `app.licenses`, refreshed on every build) for `giode.LicensesView`. |
 | `giode upgrade [version]` | Updates the project's giode dependency and tidies `go.mod`. |
 | `giode manifest [android\|ios\|macos]` | Prints what `giode.toml` adds to the manifest and Info.plist. |
 | `giode clean` | Removes `dist`. |
@@ -73,10 +79,14 @@ to print what they run. Targets have short names too: `apk`, `bundle`, `win`, `m
 | Target | Builds on | Needs |
 | --- | --- | --- |
 | `android`, `aab` | Linux, macOS, Windows | Android SDK with build tools, a platform and the NDK; a JDK |
-| `ios`, `ios-sim`, `macos` | macOS | Xcode; for `ios`, a provisioning profile |
+| `ios`, `ios-sim`, `macos`, `dmg` | macOS | Xcode; for `ios`, a provisioning profile |
 | `windows` | Linux, macOS, Windows | nothing extra: Gio doesn't need cgo on Windows |
+| `msix`, `winget` | Linux, macOS, Windows | nothing extra for `msix` (giode writes it); `winget` builds the setup program, so NSIS |
 | `windows-installer` | Linux, macOS, Windows | [NSIS](https://nsis.sourceforge.io) (`winget install NSIS.NSIS`, `brew install makensis`, `apt install nsis`) |
 | `linux` | Linux | gcc and Gio's Wayland/X11/EGL development packages |
+| `deb`, `rpm` | Linux | as `linux`; packages are written by giode itself |
+| `appimage` | Linux | as `linux`, plus [appimagetool](https://github.com/AppImage/appimagetool/releases) on PATH |
+| `flatpak` | Linux | as `linux`; with `flatpak-builder` a `.flatpak` bundle, without it the manifest |
 | `web` | anywhere | nothing extra |
 
 `giode doctor` checks all of these.
@@ -97,6 +107,7 @@ publisher = "Example Ltd"     # shown by installers and Windows' app list
 description = "An AI agent in your pocket."
 website = "https://example.com"
 schemes = ["agent"]           # URL schemes the app opens
+links = ["https://example.com/app/*"]   # universal links / App Links; see giode links
 tags = ""                     # Go build tags
 ldflags = ""                  # extra linker flags
 output = "dist"
@@ -114,10 +125,15 @@ manifest = '<uses-feature android:name="android.hardware.camera" android:require
 application = '<meta-data android:name="example" android:value="1"/>'
 keystore = "release.keystore" # used by giode build -release
 keystore_pass_env = "GIODE_KEYSTORE_PASS"
+google_services = "google-services.json"   # from the Firebase console, for giode/push
+dependencies = ["com.squareup.okhttp3:okhttp:4.12.0"]  # Maven libraries built in
+libraries = ["libs/vendor.aar"]   # local .aar and .jar files built in
+# repositories = ["https://dl.google.com/dl/android/maven2", "https://repo1.maven.org/maven2"]
 
 [ios]
 min_os = 15
 profile = "Agent.mobileprovision"   # for device builds
+push = "production"           # giode/push: aps-environment (development or production)
 
 [ios.usage]                   # shown when iOS asks for a permission
 camera = "To attach photos you take."
@@ -134,6 +150,7 @@ identity = "Developer ID Application: Example Ltd (ABCDE12345)"  # signs -releas
 notary_id = "you@example.com"
 notary_team_id = "ABCDE12345"
 notary_pass_env = "GIODE_NOTARY_PASS"
+# push = "production"         # giode/push; needs profile, a .provisionprofile
 
 [macos.usage]
 microphone = "To dictate messages."
@@ -152,11 +169,58 @@ password_env = "GIODE_WINDOWS_CERT_PASS"
 timestamp = "http://timestamp.digicert.com"   # "none" to skip
 # command = ["AzureSignTool", "sign", "-kvu", "https://vault.vault.azure.net", "-kvc", "cert", "-kvm", "-tr", "http://timestamp.digicert.com", "{file}"]
 
+[windows.msix]                       # giode build msix
+publisher = "CN=Example Ltd"         # the signing certificate's subject (or Partner Center's ID)
+identity_name = "ExampleLtd.PocketAgent"   # reserved in Partner Center for the Store
+
+[windows.winget]                     # giode build winget
+id = "Example.PocketAgent"
+installer_url = "https://example.com/download/PocketAgent-{version}-setup.exe"
+license = "MIT"
+
 [linux]
 categories = ["Utility", "Office"]
+description = "Longer text for package managers and software centers."
+maintainer = "Jane Doe <jane@example.com>"   # .deb/.rpm metadata
+license = "MIT"                              # SPDX expression
+# flatpak_permissions = ["--share=ipc", "--socket=wayland", "--device=dri"]
 
 [web]
 port = 8080
+pwa = true                    # installable, works offline (default)
+short_name = "Agent"          # under the home screen icon
+theme_color = "#111827"
+background_color = "#111827"
+
+# Self-updates for desktop builds (the giode update package); giode update-key
+# writes public_key, giode release the signed feed to upload to feed_url.
+[update]
+feed_url = "https://example.com/updates/feed.json"
+public_key = "…"
+
+# The privacy manifest (PrivacyInfo.xcprivacy) App Store apps need. giode always
+# declares the system boot time and file timestamp APIs Go itself uses.
+[privacy]
+tracking = false
+[[privacy.collected]]
+type = "crash_data"           # Apple's data types, by short or full name
+linked = false
+purposes = ["app_functionality"]
+[privacy.api]
+user_defaults = ["CA92.1"]    # more required-reason APIs your code uses
+
+# Entries in the file manager's right-click menu that open the app with the
+# chosen paths (giode.Config.OnContextAction receives them).
+[[context_actions]]
+id = "ask"
+label = "Ask Pocket Agent"
+extensions = [".md", ".txt"]  # or files = true for every file
+
+[[context_actions]]
+id = "here"
+label = "Open Pocket Agent here"
+folders = true
+background = true             # the empty space of an open folder
 ```
 
 **Android permissions** take gogio's short names (`network`, `networkstate`,
@@ -170,6 +234,12 @@ port = 8080
 `bluetooth`, `faceid`, `motion`, `health`, `health_update`, `tracking`,
 `local_network`. iOS ends an app that uses the camera, microphone or speech recognition
 without one; giode's `PickPhoto` and `Dictate` check for them and return an error instead.
+
+**Context actions** go into the build (the giode library reads them, and
+`App.InstallContextActions` registers them for the current user), the Windows installer
+(Explorer's context menu, removed on uninstall; on Windows 11 under "Show more options"),
+and the macOS app's `NSServices` (Finder's Quick Actions, once the app is in
+`/Applications` and has run once).
 
 ## Signing
 
@@ -220,6 +290,26 @@ commands run in your module (`GOFLAGS` is left alone). The patch is skipped, wit
 when go isn't in module mode, or your module already replaces `gioui.org`, vendors its
 dependencies or is in a Go workspace, or when your Gio version doesn't have the code the patch expects. Set
 `gio_patches = false` under `[android]` to build against plain Gio.
+
+## Android libraries
+
+Android builds take libraries from Maven repositories, as Gradle would:
+`android.dependencies` lists `group:artifact:version` coordinates, which
+giode resolves with their dependencies from Google's Maven repository and
+Maven Central (cached in the user cache directory), and
+`android.libraries` adds local `.aar` and `.jar` files. Their classes are
+dexed with the app's (multidex when needed), their resources linked with
+R classes for their packages, their manifests merged into the app's, and
+their native libraries (for the app's ABIs) and assets packaged.
+
+A Go package can ask for libraries itself: an `android_dependencies.txt`
+next to its Go files lists coordinates, and an `android_manifest.xml`
+adds permissions and `<application>` components, for every app importing
+it. That's how giode's `push` (Firebase Cloud Messaging), `store` (Play
+Billing) and `review` (Play In-App Review) packages bring what they need;
+`push` also needs `android.google_services`, the `google-services.json`
+file from the Firebase console, which giode turns into the resources
+Firebase reads, as Google's Gradle plugin does.
 
 ## License
 

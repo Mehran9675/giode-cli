@@ -95,12 +95,38 @@ var usageKeys = map[string]string{
 // IOSPlist returns the Info.plist entries giode adds for iOS, as plist
 // XML key/value pairs.
 func (c *Config) IOSPlist() (string, error) {
-	return infoPlist(c.IOS.Usage, c.IOS.Plist)
+	raw := c.IOS.Plist
+	if c.IOS.Push != "" {
+		raw = make(map[string]any, len(c.IOS.Plist)+1)
+		for k, v := range c.IOS.Plist {
+			raw[k] = v
+		}
+		modes := []string{"remote-notification"}
+		if old, ok := raw["UIBackgroundModes"].([]any); ok {
+			for _, m := range old {
+				if s, ok := m.(string); ok && s != "remote-notification" {
+					modes = append(modes, s)
+				}
+			}
+		}
+		raw["UIBackgroundModes"] = modes
+	}
+	return infoPlist(c.IOS.Usage, raw)
 }
 
 // MacOSPlist returns the Info.plist entries giode adds for macOS.
 func (c *Config) MacOSPlist() (string, error) {
-	return infoPlist(c.MacOS.Usage, c.MacOS.Plist)
+	raw := c.MacOS.Plist
+	if len(c.ContextActions) > 0 {
+		raw = make(map[string]any, len(c.MacOS.Plist)+1)
+		for k, v := range c.MacOS.Plist {
+			raw[k] = v
+		}
+		if _, ok := raw["NSServices"]; !ok {
+			raw["NSServices"] = c.macServices()
+		}
+	}
+	return infoPlist(c.MacOS.Usage, raw)
 }
 
 func infoPlist(usage map[string]string, raw map[string]any) (string, error) {
@@ -158,6 +184,23 @@ func plistValue(v any) (string, error) {
 			b.WriteString(s)
 		}
 		b.WriteString("</array>")
+		return b.String(), nil
+	case map[string]any:
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		var b strings.Builder
+		b.WriteString("<dict>")
+		for _, k := range keys {
+			s, err := plistValue(v[k])
+			if err != nil {
+				return "", err
+			}
+			b.WriteString("<key>" + html.EscapeString(k) + "</key>" + s)
+		}
+		b.WriteString("</dict>")
 		return b.String(), nil
 	case []string:
 		a := make([]any, len(v))

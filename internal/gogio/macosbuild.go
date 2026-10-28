@@ -41,37 +41,53 @@ func buildMac(tmpDir string, bi *buildInfo) error {
 
 	builder.setInfo(bi, name)
 
-	for _, arch := range bi.archs {
-		tmpDest := filepath.Join(builder.TempDir, filepath.Base(builder.DestDir))
-		finalDest := builder.DestDir
-		if len(bi.archs) > 1 {
-			tmpDest = filepath.Join(builder.TempDir, name+"_"+arch+".app")
-			finalDest = filepath.Join(builder.DestDir, name+"_"+arch+".app")
-		}
-
-		if err := builder.buildProgram(bi, tmpDest, name, arch); err != nil {
+	// giode: several architectures make one universal app, the
+	// binaries joined with lipo, signed and notarized once.
+	tmpDest := filepath.Join(builder.TempDir, filepath.Base(builder.DestDir))
+	if len(bi.archs) == 1 {
+		if err := builder.buildProgram(bi, tmpDest, name, bi.archs[0]); err != nil {
 			return err
 		}
-
-		if bi.key != "" {
-			if err := builder.signProgram(bi, tmpDest, name, arch); err != nil {
+	} else {
+		var slices []string
+		for _, arch := range bi.archs {
+			d := filepath.Join(builder.TempDir, name+"_"+arch+".app")
+			if err := builder.buildProgram(bi, d, name, arch); err != nil {
 				return err
 			}
+			slices = append(slices, filepath.Join(d, "Contents", "MacOS", name))
 		}
+		if _, err := runCmd(exec.Command("ditto", filepath.Join(builder.TempDir, name+"_"+bi.archs[0]+".app"), tmpDest)); err != nil {
+			return err
+		}
+		lipo := exec.Command("lipo", append([]string{"-create", "-output", filepath.Join(tmpDest, "Contents", "MacOS", name)}, slices...)...)
+		if _, err := runCmd(lipo); err != nil {
+			return err
+		}
+	}
 
+	if bi.key != "" {
+		if err := builder.signProgram(bi, tmpDest, name, "universal"); err != nil {
+			return err
+		}
+	}
+
+	if bi.notaryAppleID != "" {
 		if err := dittozip(tmpDest, tmpDest+".zip"); err != nil {
 			return err
 		}
-
-		if bi.notaryAppleID != "" {
-			if err := builder.notarize(bi, tmpDest+".zip"); err != nil {
-				return err
-			}
-		}
-
-		if err := dittounzip(tmpDest+".zip", finalDest); err != nil {
+		if err := builder.notarize(bi, tmpDest+".zip"); err != nil {
 			return err
 		}
+		// Staple the ticket, so Gatekeeper accepts the app offline.
+		if _, err := runCmd(exec.Command("xcrun", "stapler", "staple", tmpDest)); err != nil {
+			return err
+		}
+	}
+
+	os.RemoveAll(builder.DestDir)
+	if _, err := runCmd(exec.Command("ditto", tmpDest, builder.DestDir)); err != nil {
+		return err
 	}
 
 	return nil
@@ -210,6 +226,11 @@ func (b *macBuilder) buildProgram(buildInfo *buildInfo, binDest string, name str
 	if err := os.WriteFile(filepath.Join(binDest, "/Contents/Info.plist"), b.Manifest, 0o755); err != nil {
 		return err
 	}
+	if len(extras.PrivacyManifest) > 0 {
+		if err := os.WriteFile(filepath.Join(binDest, "/Contents/Resources/PrivacyInfo.xcprivacy"), extras.PrivacyManifest, 0o644); err != nil {
+			return err
+		}
+	}
 
 	cmd := goCommand("build",
 		"-ldflags="+buildInfo.ldflags,
@@ -278,13 +299,6 @@ func (b *macBuilder) notarize(buildInfo *buildInfo, binDest string) error {
 
 func dittozip(input, output string) error {
 	cmd := exec.Command("ditto", "-c", "-k", "-X", "--rsrc", input, output)
-
-	_, err := runCmd(cmd)
-	return err
-}
-
-func dittounzip(input, output string) error {
-	cmd := exec.Command("ditto", "-x", "-k", "-X", "--rsrc", input, output)
 
 	_, err := runCmd(cmd)
 	return err

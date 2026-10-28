@@ -5,9 +5,11 @@ import (
 	"image"
 	"image/png"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestScript(t *testing.T) {
@@ -78,4 +80,69 @@ func TestBuild(t *testing.T) {
 	if err != nil || len(b) < 2 || string(b[:2]) != "MZ" {
 		t.Errorf("setup program not written: %v", err)
 	}
+}
+
+func TestScript_ContextMenu(t *testing.T) {
+	o := Options{Name: "App", ID: "com.example.app", Version: "1.0.0", Exe: `C:\b\App.exe`, Output: `C:\b\setup.exe`,
+		ContextMenu: []Verb{{Key: `*\shell\com-example-app.ask`, Label: "Ask App", ID: "ask", Arg: "%1"}}}
+	s, err := Script(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`WriteRegStr ${REGROOT} "Software\Classes\*\shell\com-example-app.ask" "MUIVerb" "Ask App"`,
+		`WriteRegStr ${REGROOT} "Software\Classes\*\shell\com-example-app.ask\command" "" '"$INSTDIR\${EXE}" --giode-action=ask "%1"'`,
+		`DeleteRegKey ${REGROOT} "Software\Classes\*\shell\com-example-app.ask"`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("script lacks %s", want)
+		}
+	}
+}
+
+// TestBuild_ContextMenuUnderWine installs and uninstalls a setup
+// program with a context menu entry under Wine, checking the registry.
+func TestBuild_ContextMenuUnderWine(t *testing.T) {
+	if _, err := findMakensis(); err != nil {
+		t.Skip(err)
+	}
+	wine, err := exec.LookPath("wine")
+	if err != nil {
+		t.Skip("no wine")
+	}
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "CtxApp.exe")
+	os.WriteFile(exe, []byte("MZ"), 0o755)
+	out := filepath.Join(dir, "setup.exe")
+	key := `HKCU\Software\Classes\*\shell\com-example-ctxapp.ask`
+	o := Options{Name: "CtxApp", ID: "com.example.ctxapp", Version: "1.0.0", Publisher: "Acme", Exe: exe, Output: out,
+		ContextMenu: []Verb{{Key: `*\shell\com-example-ctxapp.ask`, Label: "Ask CtxApp", ID: "ask", Arg: "%1"}}}
+	if err := Build(o); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) string {
+		cmd := exec.Command(wine, args...)
+		cmd.Env = append(os.Environ(), "WINEDEBUG=-all")
+		b, _ := cmd.CombinedOutput()
+		return string(b)
+	}
+	run(out, "/S")
+	defer run("reg", "delete", `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\com.example.ctxapp`, "/f")
+	if got := run("reg", "query", key+`\command`); !strings.Contains(got, `--giode-action=ask "%1"`) {
+		t.Fatalf("command after install:\n%s", got)
+	}
+	if got := run("reg", "query", key, "/v", "MUIVerb"); !strings.Contains(got, "Ask CtxApp") {
+		t.Errorf("label after install:\n%s", got)
+	}
+	// Uninstall: the uninstaller re-runs itself from a temp copy, so
+	// wait for the key to go.
+	uninst := strings.TrimSpace(run("cmd", "/c", `echo %LOCALAPPDATA%`)) + `\Programs\CtxApp\Uninstall.exe`
+	run(uninst, "/S")
+	for i := 0; i < 50; i++ {
+		if got := run("reg", "query", key); !strings.Contains(got, "MUIVerb") {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Error("context menu key left after uninstalling")
 }
