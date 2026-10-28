@@ -6,7 +6,7 @@ packages and installers for Android, iOS, macOS, Windows, Linux and the web.
 
 ```sh
 giode new                  # asks for the platforms, name, ID and version, then creates the app
-cd counter
+cd my-app                   # the folder you named
 giode run                  # on this computer
 giode run android          # on a connected phone: build, install, launch, follow the log
 giode run windows          # build the Windows app and run it (with Wine off Windows)
