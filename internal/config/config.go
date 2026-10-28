@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -320,6 +321,18 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("%s: unknown settings: %s", path, strings.Join(keys, ", "))
 	}
 	c.Dir = filepath.Dir(path)
+	// CI sets the version from a tag and the build number from its run
+	// counter.
+	if v := strings.TrimPrefix(os.Getenv("GIODE_VERSION"), "v"); v != "" {
+		c.App.Version = v
+	}
+	if b := os.Getenv("GIODE_BUILD"); b != "" {
+		n, err := strconv.Atoi(b)
+		if err != nil {
+			return nil, fmt.Errorf("$GIODE_BUILD %q isn't a number", b)
+		}
+		c.App.Build = n
+	}
 	c.setDefaults()
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)

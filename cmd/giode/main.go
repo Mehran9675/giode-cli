@@ -46,6 +46,8 @@ func init() {
 		{"links", "write the files a website serves for the app's universal links and App Links", linksUsage, cmdLinks},
 		{"update-key", "create the key pair that signs update feeds", updateKeyUsage, cmdUpdateKey},
 		{"release", "build desktop targets and write a signed update feed", releaseUsage, cmdRelease},
+		{"bump", "raise the app's version and build number", bumpUsage, cmdBump},
+		{"ci", "write a GitHub Actions workflow that builds and publishes releases", ciUsage, cmdCI},
 		{"upgrade", "update the project to the latest giode", upgradeUsage, cmdUpgrade},
 		{"manifest", "print the Android manifest and Info.plist additions from giode.toml", manifestUsage, cmdManifest},
 		{"clean", "remove build output", cleanUsage, cmdClean},

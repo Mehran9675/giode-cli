@@ -58,3 +58,19 @@ func TestLinks(t *testing.T) {
 		t.Error("an http link was accepted")
 	}
 }
+
+func TestLoad_CIOverrides(t *testing.T) {
+	t.Setenv("GIODE_VERSION", "v3.1.4")
+	t.Setenv("GIODE_BUILD", "77")
+	c, err := load(t, "[app]\nname = \"A\"\nid = \"com.example.a\"\nversion = \"1.0.0\"\nbuild = 2\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.App.Version != "3.1.4" || c.App.Build != 77 {
+		t.Errorf("version %s build %d, want 3.1.4 and 77", c.App.Version, c.App.Build)
+	}
+	t.Setenv("GIODE_BUILD", "x")
+	if _, err := load(t, "[app]\nname = \"A\"\nid = \"com.example.a\"\n"); err == nil {
+		t.Error("a non-numeric GIODE_BUILD was accepted")
+	}
+}
