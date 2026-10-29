@@ -27,7 +27,7 @@ type patch struct {
 
 // revision changes whenever the patches do, so cached copies made with
 // older patches aren't used.
-const revision = "7"
+const revision = "8"
 
 // androidPacing makes Android render at the display's refresh rate.
 // Gio asks the Choreographer for the next frame only after presenting
@@ -970,6 +970,178 @@ const giodeWSPopup = 0x80000000
 	},
 }
 
+// macosFullscreen fixes leaving (and entering) fullscreen on macOS.
+// Configure read the window's style mask, toggled fullscreen - which
+// starts AppKit's animated transition - and then wrote the mask it
+// read back, so leaving fullscreen set the fullscreen bit again in the
+// middle of leaving (AppKit allows only toggleFullScreen: to change
+// it). It also resized the window during the transition. And the mode
+// was read again only when the window drew, so once a transition
+// ended a window that wasn't drawing (a paused player) kept reporting
+// the old mode. Also, TopMost turned off left the window floating.
+var macosFullscreen = []patch{
+	{
+		file: "app/os_macos.go",
+		old: `	scale  float32
+	config Config
+`,
+		new: `	scale  float32
+	config Config
+	// giode: a fullscreen transition is running.
+	giodeFSTransition bool
+`,
+	},
+	{
+		file: "app/os_macos.go",
+		old: `		w.setTitle(cnf.Title)
+		if C.isWindowZoomed(window) == 0 {
+			C.zoomWindow(window)
+		}
+`,
+		new: `		w.setTitle(cnf.Title)
+		// giode: not while leaving fullscreen.
+		if !fullscreen && !w.giodeFSTransition && C.isWindowZoomed(window) == 0 {
+			C.zoomWindow(window)
+		}
+`,
+	},
+	{
+		file: "app/os_macos.go",
+		old: `		w.setTitle(cnf.Title)
+		w.config.Size = cnf.Size
+		cnf.Size = cnf.Size.Div(int(screenScale))
+		C.setSize(window, C.CGFloat(cnf.Size.X), C.CGFloat(cnf.Size.Y))
+		w.config.MinSize = cnf.MinSize
+		cnf.MinSize = cnf.MinSize.Div(int(screenScale))
+		C.setMinSize(window, C.CGFloat(cnf.MinSize.X), C.CGFloat(cnf.MinSize.Y))
+		w.config.MaxSize = cnf.MaxSize
+		cnf.MaxSize = cnf.MaxSize.Div(int(screenScale))
+		if cnf.MaxSize != (image.Point{}) {
+			C.setMaxSize(window, C.CGFloat(cnf.MaxSize.X), C.CGFloat(cnf.MaxSize.Y))
+		}
+		if C.isWindowZoomed(window) != 0 {
+			C.zoomWindow(window)
+		}
+`,
+		new: `		w.setTitle(cnf.Title)
+		// giode: the window isn't resized while it's fullscreen or
+		// changing to or from it: AppKit restores its frame itself.
+		resize := !fullscreen && !w.giodeFSTransition
+		w.config.Size = cnf.Size
+		cnf.Size = cnf.Size.Div(int(screenScale))
+		if resize {
+			C.setSize(window, C.CGFloat(cnf.Size.X), C.CGFloat(cnf.Size.Y))
+		}
+		w.config.MinSize = cnf.MinSize
+		cnf.MinSize = cnf.MinSize.Div(int(screenScale))
+		if resize {
+			C.setMinSize(window, C.CGFloat(cnf.MinSize.X), C.CGFloat(cnf.MinSize.Y))
+		}
+		w.config.MaxSize = cnf.MaxSize
+		cnf.MaxSize = cnf.MaxSize.Div(int(screenScale))
+		if resize && cnf.MaxSize != (image.Point{}) {
+			C.setMaxSize(window, C.CGFloat(cnf.MaxSize.X), C.CGFloat(cnf.MaxSize.Y))
+		}
+		if resize && C.isWindowZoomed(window) != 0 {
+			C.zoomWindow(window)
+		}
+`,
+	},
+	{
+		file: "app/os_macos.go",
+		old: `	if cnf.TopMost {
+		C.setWindowLevel(window, C.NSFloatingWindowLevel)
+	}
+	C.setWindowTitlebarAppearsTransparent(window, barTrans)
+	C.setWindowTitleVisibility(window, titleVis)
+	C.setWindowStyleMask(window, mask)
+`,
+		new: `	if cnf.TopMost {
+		C.setWindowLevel(window, C.NSFloatingWindowLevel)
+	} else {
+		// giode: and back.
+		C.setWindowLevel(window, C.NSNormalWindowLevel)
+	}
+	C.setWindowTitlebarAppearsTransparent(window, barTrans)
+	C.setWindowTitleVisibility(window, titleVis)
+	// giode: only toggleFullScreen: changes the fullscreen bit; keep
+	// the one the window has now, after any toggle above.
+	mask = mask&^C.NSWindowStyleMaskFullScreen | C.getWindowStyleMask(window)&C.NSWindowStyleMaskFullScreen
+	C.setWindowStyleMask(window, mask)
+`,
+	},
+	{
+		file: "app/os_macos.m",
+		old: `- (void)windowWillEnterFullScreen:(NSNotification *)notification {
+	NSWindow *window = (NSWindow *)[notification object];
+  GioView *view = (GioView *)window.contentView;
+	gio_onDraw(view.handle);
+}
+- (void)windowWillExitFullScreen:(NSNotification *)notification {
+	NSWindow *window = (NSWindow *)[notification object];
+  GioView *view = (GioView *)window.contentView;
+	gio_onDraw(view.handle);
+}
+`,
+		new: `- (void)windowWillEnterFullScreen:(NSNotification *)notification {
+	NSWindow *window = (NSWindow *)[notification object];
+  GioView *view = (GioView *)window.contentView;
+	gio_giodeFullscreenTransition(view.handle, 1);
+	gio_onDraw(view.handle);
+}
+- (void)windowWillExitFullScreen:(NSNotification *)notification {
+	NSWindow *window = (NSWindow *)[notification object];
+  GioView *view = (GioView *)window.contentView;
+	gio_giodeFullscreenTransition(view.handle, 1);
+	gio_onDraw(view.handle);
+}
+// giode: the transition is over; drawing reads the mode again and
+// reports it, even in a window that wasn't going to draw.
+- (void)windowDidEnterFullScreen:(NSNotification *)notification {
+	NSWindow *window = (NSWindow *)[notification object];
+  GioView *view = (GioView *)window.contentView;
+	gio_giodeFullscreenTransition(view.handle, 0);
+	gio_onDraw(view.handle);
+}
+- (void)windowDidExitFullScreen:(NSNotification *)notification {
+	NSWindow *window = (NSWindow *)[notification object];
+  GioView *view = (GioView *)window.contentView;
+	gio_giodeFullscreenTransition(view.handle, 0);
+	gio_onDraw(view.handle);
+}
+- (void)windowDidFailToEnterFullScreen:(NSWindow *)window {
+  GioView *view = (GioView *)window.contentView;
+	gio_giodeFullscreenTransition(view.handle, 0);
+	gio_onDraw(view.handle);
+}
+- (void)windowDidFailToExitFullScreen:(NSWindow *)window {
+  GioView *view = (GioView *)window.contentView;
+	gio_giodeFullscreenTransition(view.handle, 0);
+	gio_onDraw(view.handle);
+}
+`,
+	},
+	{
+		file: "app/giode_fullscreen_macos.go",
+		new: `// Added by giode's Gio patches: fullscreen transitions on macOS.
+
+//go:build darwin && !ios
+
+package app
+
+/*
+#include <stdint.h>
+*/
+import "C"
+
+//export gio_giodeFullscreenTransition
+func gio_giodeFullscreenTransition(h C.uintptr_t, active C.int) {
+	windowFor(h).giodeFSTransition = active != 0
+}
+`,
+	},
+}
+
 // inject lets giode's MCP server deliver pointer and key events as the
 // platform would, for its ui_pointer and ui_key tools.
 var inject = []patch{
@@ -1007,7 +1179,7 @@ var Android = append(append([]patch{}, androidPacing...), androidKeyRepeat...)
 // All is every patch, for builds of any target: the Android ones only
 // touch Android's files. Builds against it have the giode_gio tag (see
 // Tag).
-var All = append(append(append(append(append(append([]patch{}, Android...), underlay...), windowsMinimized...), windowsFullscreen...), fileDrag...), inject...)
+var All = append(append(append(append(append(append(append([]patch{}, Android...), underlay...), windowsMinimized...), windowsFullscreen...), macosFullscreen...), fileDrag...), inject...)
 
 // Tag is the build tag of builds against patched Gio, which giode uses
 // to reach the patches' hooks.

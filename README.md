@@ -298,6 +298,13 @@ patches, adding the `giode_gio` and `giode_gio2` build tags:
 - **Fullscreen on Windows**: Gio showed a fullscreen window maximized without its frame,
   and Windows draws the taskbar over maximized windows. The patched copy makes it a popup
   covering the monitor, and puts it back where and as it was when leaving fullscreen.
+- **Fullscreen on macOS**: Gio wrote the window's style mask back after starting AppKit's
+  fullscreen transition, setting the fullscreen bit again in the middle of leaving
+  fullscreen, and resized the window during the transition; the window's mode was read
+  again only when it drew, so a window that wasn't drawing kept its old mode. The patched
+  copy leaves the fullscreen bit to AppKit, doesn't resize during transitions, reports the
+  mode when a transition ends, and puts a window back to the normal level when `TopMost`
+  is turned off.
 - **Input from automation**: the MCP server's `ui_pointer` and `ui_key` deliver pointer
   and key events to the window's input as the platform would.
 
