@@ -102,8 +102,7 @@ type App struct {
 	// Output is where builds go, "dist" by default.
 	Output string `toml:"output"`
 	// Platforms are the platforms the app is for: windows, macos,
-	// linux, android, ios, web. giode build with no target builds the
-	// ones this computer can.
+	// linux, android, ios, web.
 	Platforms []string `toml:"platforms"`
 }
 

@@ -26,7 +26,7 @@ const buildUsage = `
 Usage: giode build [options] [target...]
 
 Builds the app in giode.toml for each target, into dist/<platform>. With
-no target it builds the app's platforms (app.platforms) this computer can:
+no target it builds for this computer's platform, like desktop:
 
 	android   an APK for phones and tablets (dist/android/<App>.apk)
 	aab       an Android App Bundle for Google Play (dist/android/<App>.aab)
@@ -100,11 +100,7 @@ func cmdBuild(args []string) error {
 		return err
 	}
 	if len(targets) == 0 {
-		targets = platformTargets(c)
-		if len(targets) == 0 {
-			fs.Usage()
-			return errors.New("name a target, or list the app's platforms in giode.toml (app.platforms)")
-		}
+		targets = []string{hostTarget()}
 	}
 	if o.output != "" && len(targets) > 1 {
 		return errors.New("-o works with one target only")
@@ -634,33 +630,3 @@ func versionLdflags(c *config.Config) string {
 // licensesWritten records projects whose app.licenses this run already
 // refreshed.
 var licensesWritten = map[string]bool{}
-
-// platformTargets returns the targets for app.platforms this computer
-// can build, saying which it skips.
-func platformTargets(c *config.Config) []string {
-	var out, skipped []string
-	for _, p := range c.App.Platforms {
-		switch p {
-		case "macos", "ios":
-			if runtime.GOOS != "darwin" {
-				skipped = append(skipped, p+" (needs macOS)")
-				continue
-			}
-		case "linux":
-			if runtime.GOOS != "linux" {
-				skipped = append(skipped, p+" (needs Linux)")
-				continue
-			}
-		case "android":
-			if androidHome() == "" {
-				skipped = append(skipped, p+" (needs the Android SDK: giode doctor)")
-				continue
-			}
-		}
-		out = append(out, p)
-	}
-	if len(skipped) > 0 {
-		fmt.Fprintf(os.Stderr, "giode build: skipping %s\n", strings.Join(skipped, ", "))
-	}
-	return out
-}
