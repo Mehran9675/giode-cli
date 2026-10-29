@@ -75,7 +75,7 @@ jobs:
         run: |
           giode cert
           giode build -x -release windows-installer
-          for f in dist/windows/Demo.exe dist/windows/Demo-0.1.0-setup.exe; do
+          for f in dist/windows/Demo.exe dist/windows/Demo-0.1.0-amd64-setup.exe; do
             # The certificate is self-signed, so verification of its
             # chain fails; check the signature is ours and timestamped.
             osslsigncode verify -in "$f" > verify.txt 2>&1 || true
@@ -169,7 +169,7 @@ jobs:
         working-directory: ${{ runner.temp }}/demo
         shell: pwsh
         run: |
-          foreach ($f in 'dist\windows\Demo.exe', 'dist\windows\Demo-0.1.0-setup.exe') {
+          foreach ($f in 'dist\windows\Demo.exe', 'dist\windows\Demo-0.1.0-amd64-setup.exe') {
             $s = Get-AuthenticodeSignature $f
             "$f : $($s.Status) $($s.SignerCertificate.Subject)"
             # Self-signed, so not trusted, but signed by our certificate.
@@ -179,7 +179,7 @@ jobs:
         working-directory: ${{ runner.temp }}/demo
         shell: pwsh
         run: |
-          Start-Process -Wait -FilePath 'dist\windows\Demo-0.1.0-setup.exe' -ArgumentList '/S'
+          Start-Process -Wait -FilePath 'dist\windows\Demo-0.1.0-amd64-setup.exe' -ArgumentList '/S'
           $dir = Join-Path $env:LOCALAPPDATA 'Programs\Demo'
           if (-not (Test-Path (Join-Path $dir 'Demo.exe'))) { throw 'Demo.exe not installed' }
           $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\org.giode.demo'

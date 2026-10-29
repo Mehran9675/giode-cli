@@ -89,7 +89,9 @@ func TestCollectSystemOnly(t *testing.T) {
 func TestLookupFoldsCaseOnWindows(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "LIBMPV-2.DLL"), nil, 0o644)
-	if p := lookup(dir, "libmpv-2.dll", true); !strings.HasSuffix(p, "LIBMPV-2.DLL") {
+	// On a case-insensitive file system (macOS, Windows) the name asked
+	// for finds the file as it's spelled.
+	if p := lookup(dir, "libmpv-2.dll", true); !strings.EqualFold(filepath.Base(p), "LIBMPV-2.DLL") {
 		t.Errorf("windows lookup: %q", p)
 	}
 	// On a case-insensitive file system (macOS, Windows) the plain
