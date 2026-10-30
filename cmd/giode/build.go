@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,7 +27,7 @@ const buildUsage = `
 Usage: giode build [options] [target...]
 
 Builds the app in giode.toml for each target, into dist/<platform>. With
-no target it builds the app's platforms (app.platforms) this computer can:
+no target it builds for this computer's platform, like desktop:
 
 	android   an APK for phones and tablets (dist/android/<App>.apk)
 	aab       an Android App Bundle for Google Play (dist/android/<App>.aab)
@@ -100,11 +101,7 @@ func cmdBuild(args []string) error {
 		return err
 	}
 	if len(targets) == 0 {
-		targets = platformTargets(c)
-		if len(targets) == 0 {
-			fs.Usage()
-			return errors.New("name a target, or list the app's platforms in giode.toml (app.platforms)")
-		}
+		targets = []string{hostTarget()}
 	}
 	if o.output != "" && len(targets) > 1 {
 		return errors.New("-o works with one target only")
@@ -380,7 +377,7 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 			g.Arch = strings.Join(c.Android.Arch, ",")
 		}
 		perms, manifest, app := c.AndroidExtras()
-		g.Extras = gogio.Extras{AndroidPermissions: perms, AndroidManifest: manifest, AndroidApplication: app, AndroidActivity: c.AndroidActivityXML()}
+		g.Extras = gogio.Extras{AndroidPermissions: perms, AndroidManifest: manifest, AndroidApplication: app, AndroidApplicationAttrs: c.AndroidApplicationAttrs(), AndroidActivity: c.AndroidActivityXML()}
 		values, err := c.GoogleServicesXML()
 		if err != nil {
 			return g, err
@@ -390,6 +387,11 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 		for _, l := range c.Android.Libraries {
 			g.AndroidLibs = append(g.AndroidLibs, c.Path(l))
 		}
+		java, err := javaSources(c)
+		if err != nil {
+			return g, err
+		}
+		g.Extras.AndroidJava = java
 		if o.release {
 			if c.Android.Keystore == "" {
 				return g, errors.New("-release needs android.keystore in giode.toml (giode keystore creates one)")
@@ -635,32 +637,29 @@ func versionLdflags(c *config.Config) string {
 // refreshed.
 var licensesWritten = map[string]bool{}
 
-// platformTargets returns the targets for app.platforms this computer
-// can build, saying which it skips.
-func platformTargets(c *config.Config) []string {
-	var out, skipped []string
-	for _, p := range c.App.Platforms {
-		switch p {
-		case "macos", "ios":
-			if runtime.GOOS != "darwin" {
-				skipped = append(skipped, p+" (needs macOS)")
-				continue
-			}
-		case "linux":
-			if runtime.GOOS != "linux" {
-				skipped = append(skipped, p+" (needs Linux)")
-				continue
-			}
-		case "android":
-			if androidHome() == "" {
-				skipped = append(skipped, p+" (needs the Android SDK: giode doctor)")
-				continue
-			}
+// javaSources returns the .java files android.java names: files, and
+// directories searched recursively.
+func javaSources(c *config.Config) ([]string, error) {
+	var files []string
+	for _, p := range c.Android.Java {
+		root := c.Path(p)
+		st, err := os.Stat(root)
+		if err != nil {
+			return nil, fmt.Errorf("android.java: %w", err)
 		}
-		out = append(out, p)
+		if !st.IsDir() {
+			files = append(files, root)
+			continue
+		}
+		err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() && strings.HasSuffix(path, ".java") {
+				files = append(files, path)
+			}
+			return err
+		})
+		if err != nil {
+			return nil, fmt.Errorf("android.java: %w", err)
+		}
 	}
-	if len(skipped) > 0 {
-		fmt.Fprintf(os.Stderr, "giode build: skipping %s\n", strings.Join(skipped, ", "))
-	}
-	return out
+	return files, nil
 }

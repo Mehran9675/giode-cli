@@ -51,7 +51,7 @@ target needs.
 | Command | What it does |
 | --- | --- |
 | `giode new [dir]` | Creates a project: a counter app in `main.go`, `go.mod` with the latest giode, `giode.toml` set up for the chosen platforms, placeholder assets (`assets/icon.png`, `assets/README.md`), `.gitignore` and a README. In a terminal it asks first: a checklist of every platform (Windows, macOS, Linux, Android, iOS, Web - whether or not this computer builds them; arrow keys move, Space checks, Enter goes on), then the name, app ID, version, module path, publisher, description and website, each with a suggestion Enter takes. `-y` skips the questions; `-platforms android,ios`, `-id`, `-name` and `-version` answer them. |
-| `giode build` (no target) | Builds the platforms in `app.platforms` that this computer can, saying which it skips. |
+| `giode build` (no target) | Builds for this computer's platform: `macos`, `windows` or `linux`, the same as `giode build desktop`. |
 | `giode init` | Adds `giode.toml` to an existing Go module. |
 | `giode build <target>...` | Builds into `dist/<platform>`. Targets: `android` (APK), `aab` (Play bundle), `ios` (IPA), `ios-sim`, `macos` (universal), `dmg`, `windows`, `windows-installer` (setup program), `msix`, `winget`, `linux`, `deb`, `rpm`, `appimage`, `flatpak`, `web`, `desktop` (this computer) and `all` (everything this computer can build). `-release` signs with your certificates. |
 | `giode run [target]` | Builds for a target and runs it: `desktop` (default: `go build`, then the program), `linux`, `windows` (Wine off Windows), `windows-installer`, `macos`, `android` (builds the device's architecture, installs, launches, follows the log), `ios-sim`, `web` (serves `dist/web`). `-mcp` starts giode's MCP server so an AI agent can drive the app. |
@@ -64,7 +64,7 @@ target needs.
 | `giode update-key` | Creates the Ed25519 key pair signing update feeds: the private key in `update.key` (added to `.gitignore`), the public key in `[update]`. |
 | `giode release [targets]` | Builds desktop targets and writes `dist/update/`: the downloads, `feed.json` and its signature, for apps using the giode `update` package. |
 | `giode bump [major\|minor\|patch\|build]` | Raises `app.version` and always `app.build`. In CI, `$GIODE_VERSION` (a tag like `v1.4.2`) and `$GIODE_BUILD` override both. |
-| `giode ci` | Writes `.github/workflows/release.yml`: on a version tag, builds Linux, Windows, Android and macOS packages, signed with the repository's secrets when present, and attaches them to a GitHub release. |
+| `giode ci` | Writes `.github/workflows/release.yml`: on a version tag (or a published release, with `ci.trigger = "release"`), runs the tests, builds packages for the platforms in `app.platforms` (iOS included), signed with the repository's secrets when present, and attaches them to the GitHub release. |
 | `giode licenses` | Writes the licenses of the app's Go modules (on any platform) and Go's to `assets/licenses.json` (or `app.licenses`, refreshed on every build) for `giode.LicensesView`. |
 | `giode upgrade [version]` | Updates the project's giode dependency and tidies `go.mod`. |
 | `giode manifest [android\|ios\|macos]` | Prints what `giode.toml` adds to the manifest and Info.plist. |
@@ -131,6 +131,8 @@ notifications = true          # POST_NOTIFICATIONS for App.Notify (default true)
 queries = ["com.android.chrome"]
 manifest = '<uses-feature android:name="android.hardware.camera" android:required="false"/>'
 application = '<meta-data android:name="example" android:value="1"/>'
+application_attributes = { requestLegacyExternalStorage = "true" }  # on <application>
+java = ["android/java"]       # the app's own Java sources, compiled in (see giode/android)
 keystore = "release.keystore" # used by giode build -release
 keystore_pass_env = "GIODE_KEYSTORE_PASS"
 google_services = "google-services.json"   # from the Firebase console, for giode/push
@@ -140,7 +142,7 @@ libraries = ["libs/vendor.aar"]   # local .aar and .jar files built in
 
 [ios]
 min_os = 15
-profile = "Agent.mobileprovision"   # for device builds
+profile = "Agent.mobileprovision"   # for device builds ($GIODE_IOS_PROFILE overrides)
 push = "production"           # giode/push: aps-environment (development or production)
 
 [ios.usage]                   # shown when iOS asks for a permission
@@ -436,6 +438,23 @@ also built on `ubuntu-24.04-arm`, and Windows ones cross-built for arm64 (or, wi
 [ci]
 arch = ["amd64", "arm64"]   # default ["amd64"]
 ```
+
+The workflow builds the platforms in `app.platforms` (without it, all but iOS). An iOS job
+builds an IPA when the repository has the `IOS_CERT_BASE64`, `IOS_CERT_PASS` and
+`IOS_PROFILE_BASE64` secrets (`IOS_TEAM_ID` sets `ios.team_id`), and checks the simulator
+build otherwise; the profile reaches the build through `$GIODE_IOS_PROFILE`, so giode.toml
+needn't name it. A test job runs first and stops the release when it fails. Change what it
+runs, or turn it off, with `test`. `trigger = "release"` builds when a GitHub release is
+published, adding the files to it, instead of on a pushed tag:
+
+```toml
+[ci]
+trigger = "release"                    # default "tag"
+test = "go vet ./... && go test ./..." # default "go test ./..."; "" runs none
+```
+
+Rerun `giode ci -f` after changing `[ci]` rather than editing the workflow: it's written
+from giode.toml and overwritten.
 
 Every package's name carries its CPU, so builds for two CPUs can share a release:
 `<App>-<version>-<arch>-setup.exe`, `<App>-<version>-<arch>.msix` and

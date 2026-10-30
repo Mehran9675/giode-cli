@@ -122,3 +122,20 @@ func TestFind(t *testing.T) {
 		t.Error("found a giode.toml where there's none")
 	}
 }
+
+func TestAndroidApplicationAttrs(t *testing.T) {
+	c, err := load(t, `
+[app]
+name = "R"
+id = "com.example.r"
+[android.application_attributes]
+requestLegacyExternalStorage = "true"
+largeHeap = "true"
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := c.AndroidApplicationAttrs(), ` android:largeHeap="true" android:requestLegacyExternalStorage="true"`; got != want {
+		t.Errorf("attributes %q, want %q", got, want)
+	}
+}

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -68,6 +70,68 @@ func TestLdflagsVersion(t *testing.T) {
 	for _, w := range []string{"-X main.version=1.4.2", "-X main.build=31", "-X github.com/mehran9675/giode.AppVersion=1.4.2", "-X github.com/mehran9675/giode.AppBuild=31"} {
 		if !strings.Contains(got, w) {
 			t.Errorf("ldflags %q lack %q", got, w)
+		}
+	}
+}
+
+func TestJavaSources(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"java/org/x/A.java", "java/org/x/notes.txt", "extra/B.java"} {
+		p := filepath.Join(dir, f)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, nil, 0o644)
+	}
+	c := &config.Config{Dir: dir, Android: config.Android{Java: []string{"java", "extra/B.java"}}}
+	got, err := javaSources(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(dir, "java/org/x/A.java"), filepath.Join(dir, "extra/B.java")}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("sources %q, want %q", got, want)
+	}
+	c.Android.Java = []string{"missing"}
+	if _, err := javaSources(c); err == nil {
+		t.Error("a missing android.java directory gave no error")
+	}
+}
+
+func TestWorkflowPlatformsTriggerTest(t *testing.T) {
+	none := ""
+	c := &config.Config{
+		App: config.App{Platforms: []string{"windows", "android", "ios"}},
+		CI:  config.CI{Trigger: "release", Test: &none},
+	}
+	wf := workflow(c)
+	for _, w := range []string{"release:\n    types: [published]", "giode build $apk android aab", "windows-installer msix", "\n  ios:\n", "giode build ios-sim", "needs: [linux, ios]", "tag_name: ${{ github.ref_name }}"} {
+		if !strings.Contains(wf, w) {
+			t.Errorf("lacks %q", w)
+		}
+	}
+	for _, w := range []string{"giode build web", "giode build deb rpm", "\n  macos:", "\n  test:", "push:\n    tags", "generate_release_notes"} {
+		if strings.Contains(wf, w) {
+			t.Errorf("has %q", w)
+		}
+	}
+
+	def := workflow(&config.Config{App: config.App{Platforms: []string{"linux", "macos"}}})
+	for _, w := range []string{"\n  test:", "go test ./...", "needs: test", "giode build deb rpm", "needs: [linux, macos]", "push:\n    tags: [\"v*\"]"} {
+		if !strings.Contains(def, w) {
+			t.Errorf("default lacks %q", w)
+		}
+	}
+	for _, w := range []string{"giode build web", "android aab", "windows-installer", "\n  ios:"} {
+		if strings.Contains(def, w) {
+			t.Errorf("linux and macOS only, but has %q", w)
+		}
+	}
+	if py, err := exec.LookPath("python3"); err == nil {
+		for _, s := range []string{wf, def} {
+			cmd := exec.Command(py, "-c", "import sys, yaml; yaml.safe_load(sys.stdin)")
+			cmd.Stdin = strings.NewReader(s)
+			if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "No module named") {
+				t.Errorf("not YAML: %v\n%s\n%s", err, out, s)
+			}
 		}
 	}
 }

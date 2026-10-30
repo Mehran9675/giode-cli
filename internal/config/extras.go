@@ -71,6 +71,20 @@ func (c *Config) AndroidExtras() (perms []string, manifest, application string) 
 	return perms, strings.TrimSpace(c.Android.Manifest), application
 }
 
+// AndroidApplicationAttrs returns android.application_attributes as
+// XML attributes, each with a leading space, sorted by name.
+func (c *Config) AndroidApplicationAttrs() string {
+	var b strings.Builder
+	for _, k := range sortedKeys(c.Android.ApplicationAttributes) {
+		name := k
+		if !strings.Contains(name, ":") {
+			name = "android:" + name
+		}
+		fmt.Fprintf(&b, ` %s="%s"`, name, html.EscapeString(c.Android.ApplicationAttributes[k]))
+	}
+	return b.String()
+}
+
 // usageKeys maps short usage names to Info.plist keys.
 var usageKeys = map[string]string{
 	"camera":          "NSCameraUsageDescription",

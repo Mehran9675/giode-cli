@@ -55,6 +55,9 @@ type manifestData struct {
 	// ManifestXML and ApplicationXML come from Extras.
 	ManifestXML    string
 	ApplicationXML string
+	// ApplicationAttrs are extra <application> attributes
+	// (Extras.AndroidApplicationAttrs).
+	ApplicationAttrs string
 	// ActivityXML goes inside the activity (Extras.AndroidActivity).
 	ActivityXML string
 }
@@ -291,6 +294,7 @@ func compileAndroid(tmpDir string, tools *androidTools, bi *buildInfo) (err erro
 	if len(javaFiles) == 0 {
 		return fmt.Errorf("the gioui.org/app package contains no .java files (gioui.org module too old?)")
 	}
+	javaFiles = append(javaFiles, extras.AndroidJava...)
 	if len(javaFiles) > 0 {
 		classes := filepath.Join(tmpDir, "classes")
 		if err := os.MkdirAll(classes, 0o755); err != nil {
@@ -484,19 +488,20 @@ func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, li
 	permissions = addPermissions(permissions, merged.permissions)
 	appName := UppercaseName(bi.name)
 	manifestSrc := manifestData{
-		AppID:          bi.appID,
-		Version:        bi.version,
-		MinSDK:         minSDK,
-		TargetSDK:      targetSDK,
-		Permissions:    permissions,
-		Features:       features,
-		IconSnip:       iconSnip,
-		AppName:        appName,
-		Schemes:        bi.schemes,
-		PackageQueries: bi.packageQueries,
-		ManifestXML:    extras.AndroidManifest + merged.manifest,
-		ApplicationXML: merged.application,
-		ActivityXML:    extras.AndroidActivity,
+		AppID:            bi.appID,
+		Version:          bi.version,
+		MinSDK:           minSDK,
+		TargetSDK:        targetSDK,
+		Permissions:      permissions,
+		Features:         features,
+		IconSnip:         iconSnip,
+		AppName:          appName,
+		Schemes:          bi.schemes,
+		PackageQueries:   bi.packageQueries,
+		ManifestXML:      extras.AndroidManifest + merged.manifest,
+		ApplicationXML:   merged.application,
+		ApplicationAttrs: extras.AndroidApplicationAttrs,
+		ActivityXML:      extras.AndroidActivity,
 	}
 	manifestXML, err := androidManifest(manifestSrc)
 	if err != nil {
@@ -1193,7 +1198,7 @@ var apkManifest = template.Must(template.New("manifest").Parse(
 {{range .Permissions}}	<uses-permission android:name="{{.}}"/>
 {{end}}{{range .Features}}	<uses-feature android:{{.}} android:required="false"/>
 {{end}}{{.ManifestXML}}
-	<application {{.IconSnip}} android:label="{{.AppName}}">
+	<application {{.IconSnip}} android:label="{{.AppName}}"{{.ApplicationAttrs}}>
 		<activity android:name="org.gioui.GioActivity"
 			android:label="{{.AppName}}"
 			android:theme="@style/Theme.GioApp"

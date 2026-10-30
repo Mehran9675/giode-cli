@@ -102,8 +102,7 @@ type App struct {
 	// Output is where builds go, "dist" by default.
 	Output string `toml:"output"`
 	// Platforms are the platforms the app is for: windows, macos,
-	// linux, android, ios, web. giode build with no target builds the
-	// ones this computer can.
+	// linux, android, ios, web.
 	Platforms []string `toml:"platforms"`
 }
 
@@ -138,6 +137,10 @@ type Android struct {
 	// added inside <application>.
 	Manifest    string `toml:"manifest"`
 	Application string `toml:"application"`
+	// ApplicationAttributes are attributes set on <application>, by
+	// name: requestLegacyExternalStorage = "true" (android: is added to
+	// names without a namespace).
+	ApplicationAttributes map[string]string `toml:"application_attributes"`
 	// Keystore signs release builds (giode build -release);
 	// KeystorePassEnv names the environment variable holding its
 	// password, GIODE_KEYSTORE_PASS by default. Debug builds use the
@@ -158,6 +161,11 @@ type Android struct {
 	Repositories []string `toml:"repositories"`
 	// Libraries are local .aar and .jar files built in.
 	Libraries []string `toml:"libraries"`
+	// Java are directories (searched recursively) or files of the
+	// app's own Java sources, compiled with Gio's against the SDK's
+	// android.jar (Java 8 language level) and built in: classes the
+	// app calls through giode's android package.
+	Java []string `toml:"java"`
 	// GoogleServices is the google-services.json file from the Firebase
 	// console, needed for push notifications (giode/push).
 	GoogleServices string `toml:"google_services"`
@@ -175,10 +183,11 @@ type IOS struct {
 	// Plist adds raw Info.plist keys: strings, booleans, integers and
 	// lists of strings.
 	Plist map[string]any `toml:"plist"`
-	// Profile is the provisioning profile signing device builds.
+	// Profile is the provisioning profile signing device builds;
+	// $GIODE_IOS_PROFILE overrides it.
 	Profile string `toml:"profile"`
 	// TeamID is the Apple developer team ID, for universal links'
-	// apple-app-site-association file.
+	// apple-app-site-association file; $GIODE_IOS_TEAM_ID overrides it.
 	TeamID string `toml:"team_id"`
 	// Push enables push notifications (giode/push): "development" or
 	// "production", the APNs environment of the aps-environment
@@ -392,6 +401,13 @@ func Load(path string) (*Config, error) {
 		}
 		c.App.Build = n
 	}
+	// Signing settings CI keeps in secrets rather than the repository.
+	if v := os.Getenv("GIODE_IOS_PROFILE"); v != "" {
+		c.IOS.Profile = v
+	}
+	if v := os.Getenv("GIODE_IOS_TEAM_ID"); v != "" {
+		c.IOS.TeamID = v
+	}
 	c.setDefaults()
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
@@ -492,6 +508,9 @@ func (c *Config) Validate() error {
 		if a != "amd64" && a != "arm64" {
 			errs = append(errs, fmt.Errorf("ci.arch: %q; giode ci builds amd64 and arm64", a))
 		}
+	}
+	if t := c.CI.Trigger; t != "" && t != "tag" && t != "release" {
+		errs = append(errs, fmt.Errorf("ci.trigger is %q; use tag or release", t))
 	}
 	for k, v := range map[string]string{"ios.push": c.IOS.Push, "macos.push": c.MacOS.Push} {
 		if v != "" && v != "development" && v != "production" {
@@ -627,6 +646,14 @@ type CI struct {
 	// (the default) and arm64, on GitHub's ARM runners. macOS builds are
 	// universal.
 	Arch []string `toml:"arch"`
+	// Trigger is what starts a release build: "tag" (the default), a
+	// pushed version tag, which the workflow then publishes as a
+	// release; or "release", a GitHub release being published, which
+	// the workflow adds its files to.
+	Trigger string `toml:"trigger"`
+	// Test runs before any build, on Linux, and a failure stops the
+	// release: "go test ./..." by default; "" runs none.
+	Test *string `toml:"test"`
 }
 
 // CISetup holds setup commands by runner OS.

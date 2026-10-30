@@ -140,6 +140,12 @@ type Extras struct {
 	// AndroidApplication XML added inside <application>.
 	AndroidManifest    string
 	AndroidApplication string
+	// AndroidJava are the app's own .java files, compiled with Gio's
+	// against android.jar and added to the APK.
+	AndroidJava []string
+	// AndroidApplicationAttrs are attributes added to <application>,
+	// each with a leading space: ` android:requestLegacyExternalStorage="true"`.
+	AndroidApplicationAttrs string
 	// InfoPlist is XML key/value pairs added to the iOS, tvOS and
 	// macOS Info.plist dictionary.
 	InfoPlist string
