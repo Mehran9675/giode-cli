@@ -13,17 +13,21 @@ func TestAndroidManifest_Extras(t *testing.T) {
 		t.Fatalf("permissions %v: want INTERNET once and FOREGROUND_SERVICE", perms)
 	}
 	out, err := androidManifest(manifestData{
-		AppID:          "com.example.app",
-		Version:        Semver{1, 2, 3, 4},
-		MinSDK:         21,
-		TargetSDK:      35,
-		Permissions:    perms,
-		AppName:        "App",
-		ManifestXML:    `<uses-feature android:name="android.hardware.camera" android:required="false"/>`,
-		ApplicationXML: `<service android:name="org.giode.mobile.KeepAliveService" android:exported="false"/>`,
+		AppID:            "com.example.app",
+		Version:          Semver{1, 2, 3, 4},
+		MinSDK:           21,
+		TargetSDK:        35,
+		Permissions:      perms,
+		AppName:          "App",
+		ManifestXML:      `<uses-feature android:name="android.hardware.camera" android:required="false"/>`,
+		ApplicationXML:   `<service android:name="org.giode.mobile.KeepAliveService" android:exported="false"/>`,
+		ApplicationAttrs: ` android:requestLegacyExternalStorage="true"`,
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `android:label="App" android:requestLegacyExternalStorage="true">`) {
+		t.Errorf("<application> lacks the extra attribute:\n%s", out)
 	}
 	var m struct {
 		Perms []struct {

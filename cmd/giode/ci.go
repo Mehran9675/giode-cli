@@ -105,24 +105,34 @@ func setAppValues(path, version string, build int) error {
 const ciUsage = `
 Usage: giode ci
 
-Writes .github/workflows/release.yml: on a version tag (v1.4.2) it builds
-the app for Linux (deb, rpm, web), Windows (setup program, MSIX), Android
-(APK, AAB) and macOS (DMG), signing with what your repository's secrets
-provide, and attaches everything to a GitHub release. The tag sets the
-version and the run number the build number.
+Writes .github/workflows/release.yml: on a version tag (v1.4.2) it tests
+the app, builds it for the platforms in app.platforms - Linux (deb, rpm),
+Windows (setup program, MSIX), Android (APK, AAB), macOS (DMG), iOS
+(IPA) and the web; without app.platforms, all of them but iOS - signing
+with what your repository's secrets provide, and attaches everything to a
+GitHub release. The tag sets the version and the run number the build
+number.
 
-In giode.toml, [ci] setup runs commands before building on each runner
-(installing the C libraries a cgo app links), and ci.windows_msys2 builds
-the Windows packages on a Windows runner with MSYS2's MINGW64 toolchain:
+In giode.toml, [ci] trigger = "release" builds when a GitHub release is
+published instead, adding the files to it; test sets the commands run
+before building ("go test ./..." by default, "" for none); setup runs
+commands before building on each runner (installing the C libraries a
+cgo app links); and windows_msys2 builds the Windows packages on a
+Windows runner with MSYS2's MINGW64 toolchain:
 
 	[ci]
+	trigger = "release"
+	test = "go vet ./... && go test ./..."
 	windows_msys2 = true
+	arch = ["amd64", "arm64"]       # builds per CPU: Linux on ubuntu-24.04-arm,
+	                               # Windows on windows-11-arm (CLANGARM64)
 	[ci.setup]
 	macos = "brew install mpv"
 	linux = "sudo apt-get install -y libmpv-dev"
 	windows = "pacman -S --noconfirm ${MINGW_PACKAGE_PREFIX}-mpv"
-	arch = ["amd64", "arm64"]       # builds per CPU: Linux on ubuntu-24.04-arm,
-	                               # Windows on windows-11-arm (CLANGARM64)
+
+Rerun giode ci -f after changing these rather than editing the workflow,
+which it overwrites.
 
 Secrets it uses when set (Settings > Secrets and variables > Actions):
 
@@ -130,7 +140,13 @@ Secrets it uses when set (Settings > Secrets and variables > Actions):
 	WINDOWS_CERT_BASE64, GIODE_WINDOWS_CERT_PASS   Windows .pfx certificate
 	MACOS_CERT_BASE64, MACOS_CERT_PASS             macOS Developer ID .p12
 	GIODE_NOTARY_PASS                              notarization password
+	IOS_CERT_BASE64, IOS_CERT_PASS                 iOS distribution .p12
+	IOS_PROFILE_BASE64                             iOS provisioning profile
+	IOS_TEAM_ID                                    Apple team ID (ios.team_id)
 	GIODE_UPDATE_KEY                               update feed key (giode release)
+
+Without the iOS certificate and profile the iOS job builds for the
+simulator only.
 `
 
 func cmdCI(args []string) error {
@@ -154,7 +170,11 @@ func cmdCI(args []string) error {
 	if err := os.WriteFile(path, []byte(workflow(c)), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("Wrote %s. Push a tag to release: git tag v%s && git push --tags\n", relPath(path), c.App.Version)
+	if c.CI.Trigger == "release" {
+		fmt.Printf("Wrote %s. Publish a release on GitHub (tag v%s) to build and attach the packages.\n", relPath(path), c.App.Version)
+	} else {
+		fmt.Printf("Wrote %s. Push a tag to release: git tag v%s && git push --tags\n", relPath(path), c.App.Version)
+	}
 	return nil
 }
 
@@ -185,6 +205,15 @@ type ciData struct {
 	WindowsMSYS2                   bool
 	SetupLinux, SetupMac, SetupWin string
 	Needs                          string
+
+	// Release builds when a GitHub release is published, rather than
+	// on a pushed tag.
+	Release bool
+	// Test holds the test commands, indented; empty runs no test job.
+	Test string
+	// The platforms built: Linux packages, the web, Android, macOS,
+	// iOS. LinuxJob is whether the Linux job has anything to build.
+	LinuxPkgs, Web, Android, MacOS, IOS, LinuxJob bool
 }
 
 func newCIData(c *config.Config) ciData {
@@ -192,21 +221,51 @@ func newCIData(c *config.Config) ciData {
 	if len(archs) == 0 {
 		archs = []string{"amd64"}
 	}
+	// Without app.platforms, everything but iOS, which needs signing
+	// set up first.
+	has := func(p string) bool {
+		if len(c.App.Platforms) == 0 {
+			return p != "ios"
+		}
+		for _, q := range c.App.Platforms {
+			if q == p {
+				return true
+			}
+		}
+		return false
+	}
+	test := "go test ./..."
+	if c.CI.Test != nil {
+		test = *c.CI.Test
+	}
 	d := ciData{
 		Keystore:     orDefault(c.Android.Keystore, "release.keystore"),
 		Cert:         orDefault(c.Windows.Signing.Certificate, "codesign.pfx"),
-		WindowsMSYS2: c.CI.WindowsMSYS2,
+		WindowsMSYS2: c.CI.WindowsMSYS2 && has("windows"),
 		SetupLinux:   setupIndent(c.CI.Setup.Linux, "          "),
 		SetupMac:     setupIndent(c.CI.Setup.MacOS, "          "),
 		SetupWin:     setupIndent(c.CI.Setup.Windows, "          "),
+		Release:      c.CI.Trigger == "release",
+		Test:         setupIndent(test, "          "),
+		LinuxPkgs:    has("linux"),
+		Web:          has("web"),
+		Android:      has("android"),
+		MacOS:        has("macos"),
+		IOS:          has("ios"),
 	}
 	for i, a := range archs {
 		runner := "ubuntu-latest"
 		if a == "arm64" {
 			runner = "ubuntu-24.04-arm"
 		}
-		d.Linux = append(d.Linux, ciRunner{Arch: a, Runner: runner, Primary: i == 0})
-		if c.CI.WindowsMSYS2 {
+		// Only Linux packages are built per CPU on Linux runners.
+		if i == 0 || d.LinuxPkgs {
+			d.Linux = append(d.Linux, ciRunner{Arch: a, Runner: runner, Primary: i == 0})
+		}
+		if !has("windows") {
+			continue
+		}
+		if d.WindowsMSYS2 {
 			w := ciRunner{Arch: a, Runner: "windows-latest", MSYSTEM: "MINGW64", CC: "gcc"}
 			if a == "arm64" {
 				w = ciRunner{Arch: a, Runner: "windows-11-arm", MSYSTEM: "CLANGARM64", CC: "clang", ChocoNSIS: true}
@@ -216,10 +275,17 @@ func newCIData(c *config.Config) ciData {
 			d.CrossWindows = append(d.CrossWindows, a)
 		}
 	}
-	d.Needs = "linux, macos"
-	if c.CI.WindowsMSYS2 {
-		d.Needs += ", windows"
+	d.LinuxJob = d.LinuxPkgs || d.Web || d.Android || len(d.CrossWindows) > 0
+	var needs []string
+	for _, j := range []struct {
+		name string
+		on   bool
+	}{{"linux", d.LinuxJob}, {"macos", d.MacOS}, {"windows", d.WindowsMSYS2}, {"ios", d.IOS}} {
+		if j.on {
+			needs = append(needs, j.name)
+		}
 	}
+	d.Needs = strings.Join(needs, ", ")
 	return d
 }
 
@@ -242,12 +308,23 @@ func orDefault(s, d string) string {
 var workflowTemplate = template.Must(template.New("release").Delims("[[", "]]").Parse(releaseWorkflow))
 
 // releaseWorkflow is the GitHub Actions workflow giode ci writes.
-const releaseWorkflow = `# Written by giode ci. Builds and publishes a release when a version tag is pushed.
+const releaseWorkflow = `# Written by giode ci from giode.toml; rerun giode ci -f after changing
+# [ci] there rather than editing this file.
+[[- if .Release]]
+# Builds when a GitHub release is published and adds the files to it.
+[[- else]]
+# Builds and publishes a release when a version tag is pushed.
+[[- end]]
 name: release
 
 on:
+[[- if .Release]]
+  release:
+    types: [published]
+[[- else]]
   push:
     tags: ["v*"]
+[[- end]]
   workflow_dispatch:
 
 permissions:
@@ -258,7 +335,33 @@ env:
   GIODE_BUILD: ${{ github.run_number }}
 
 jobs:
+[[- if .Test]]
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev libffi-dev libxcursor-dev libvulkan-dev
+[[- if .SetupLinux]]
+      - name: Project setup (giode.toml ci.setup)
+        run: |
+[[.SetupLinux]]
+[[- end]]
+      - name: Test (giode.toml ci.test)
+        run: |
+[[.Test]]
+[[- end]]
+[[- if .LinuxJob]]
+
   linux:
+[[- if .Test]]
+    needs: test
+[[- end]]
     strategy:
       matrix:
         include:[[range .Linux]]
@@ -288,15 +391,20 @@ jobs:
         run: |
           if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > [[.Keystore]]; fi
           if [ -n "$WINDOWS_CERT_BASE64" ]; then echo "$WINDOWS_CERT_BASE64" | base64 -d > [[.Cert]]; fi
+[[- if .LinuxPkgs]]
       - name: Build Linux packages
         run: giode build deb rpm
-      - name: Build web, Windows and Android
+[[- end]]
+[[- if or .Web .CrossWindows .Android]]
+      - name: Build[[if .Web]] web[[end]][[if .CrossWindows]] Windows[[end]][[if .Android]] Android[[end]]
         if: matrix.primary
         env:
           GIODE_KEYSTORE_PASS: ${{ secrets.GIODE_KEYSTORE_PASS }}
           GIODE_WINDOWS_CERT_PASS: ${{ secrets.GIODE_WINDOWS_CERT_PASS }}
         run: |
+[[- if .Web]]
           giode build web
+[[- end]]
 [[- if .CrossWindows]]
           # Signed when the repository has the certificate or keystore.
           win=""; if [ -n "$GIODE_WINDOWS_CERT_PASS" ]; then win="-release"; fi
@@ -304,8 +412,11 @@ jobs:
           giode build $win -arch [[.]] windows-installer msix
 [[- end]]
 [[- end]]
+[[- if .Android]]
           apk=""; if [ -n "$GIODE_KEYSTORE_PASS" ]; then apk="-release"; fi
           giode build $apk android aab
+[[- end]]
+[[- end]]
       - uses: actions/upload-artifact@v4
         with:
           name: linux-${{ matrix.arch }}
@@ -318,8 +429,13 @@ jobs:
             dist/android/*.apk
             dist/android/*.aab
             dist/android/native-debug-symbols.zip
+[[- end]]
+[[- if .MacOS]]
 
   macos:
+[[- if .Test]]
+    needs: test
+[[- end]]
     runs-on: macos-latest
     env:
       MACOS_CERT_BASE64: ${{ secrets.MACOS_CERT_BASE64 }}
@@ -357,9 +473,61 @@ jobs:
         with:
           name: macos
           path: dist/macos/*.dmg
+[[- end]]
+[[- if .IOS]]
+
+  ios:
+[[- if .Test]]
+    needs: test
+[[- end]]
+    runs-on: macos-latest
+    env:
+      IOS_CERT_BASE64: ${{ secrets.IOS_CERT_BASE64 }}
+      IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go install github.com/mehran9675/giode-cli/cmd/giode@latest
+[[- if .SetupMac]]
+      - name: Project setup (giode.toml ci.setup)
+        run: |
+[[.SetupMac]]
+[[- end]]
+      - name: Signing certificate and profile
+        if: env.IOS_CERT_BASE64 != '' && env.IOS_PROFILE_BASE64 != ''
+        env:
+          IOS_CERT_PASS: ${{ secrets.IOS_CERT_PASS }}
+        run: |
+          echo "$IOS_CERT_BASE64" | base64 -d > cert.p12
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          security import cert.p12 -k build.keychain -P "$IOS_CERT_PASS" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain
+          rm cert.p12
+          echo "$IOS_PROFILE_BASE64" | base64 -d > "$RUNNER_TEMP/app.mobileprovision"
+          echo "GIODE_IOS_PROFILE=$RUNNER_TEMP/app.mobileprovision" >> "$GITHUB_ENV"
+      - name: Build
+        env:
+          GIODE_IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          # A device build needs the certificate and profile; without
+          # them, check that the app builds for the simulator.
+          if [ -n "$GIODE_IOS_PROFILE" ]; then giode build ios; else giode build ios-sim; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          if-no-files-found: ignore
+          path: dist/ios/*.ipa
+[[- end]]
 [[- if .WindowsMSYS2]]
 
   windows:
+[[- if .Test]]
+    needs: test
+[[- end]]
     strategy:
       matrix:
         include:[[range .Windows]]
@@ -428,5 +596,9 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
+[[- if .Release]]
+          tag_name: ${{ github.ref_name }}
+[[- else]]
           generate_release_notes: true
+[[- end]]
 `

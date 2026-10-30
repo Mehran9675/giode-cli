@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -376,7 +377,7 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 			g.Arch = strings.Join(c.Android.Arch, ",")
 		}
 		perms, manifest, app := c.AndroidExtras()
-		g.Extras = gogio.Extras{AndroidPermissions: perms, AndroidManifest: manifest, AndroidApplication: app, AndroidActivity: c.AndroidActivityXML()}
+		g.Extras = gogio.Extras{AndroidPermissions: perms, AndroidManifest: manifest, AndroidApplication: app, AndroidApplicationAttrs: c.AndroidApplicationAttrs(), AndroidActivity: c.AndroidActivityXML()}
 		values, err := c.GoogleServicesXML()
 		if err != nil {
 			return g, err
@@ -386,6 +387,11 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 		for _, l := range c.Android.Libraries {
 			g.AndroidLibs = append(g.AndroidLibs, c.Path(l))
 		}
+		java, err := javaSources(c)
+		if err != nil {
+			return g, err
+		}
+		g.Extras.AndroidJava = java
 		if o.release {
 			if c.Android.Keystore == "" {
 				return g, errors.New("-release needs android.keystore in giode.toml (giode keystore creates one)")
@@ -630,3 +636,30 @@ func versionLdflags(c *config.Config) string {
 // licensesWritten records projects whose app.licenses this run already
 // refreshed.
 var licensesWritten = map[string]bool{}
+
+// javaSources returns the .java files android.java names: files, and
+// directories searched recursively.
+func javaSources(c *config.Config) ([]string, error) {
+	var files []string
+	for _, p := range c.Android.Java {
+		root := c.Path(p)
+		st, err := os.Stat(root)
+		if err != nil {
+			return nil, fmt.Errorf("android.java: %w", err)
+		}
+		if !st.IsDir() {
+			files = append(files, root)
+			continue
+		}
+		err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() && strings.HasSuffix(path, ".java") {
+				files = append(files, path)
+			}
+			return err
+		})
+		if err != nil {
+			return nil, fmt.Errorf("android.java: %w", err)
+		}
+	}
+	return files, nil
+}

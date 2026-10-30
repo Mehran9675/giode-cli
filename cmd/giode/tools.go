@@ -196,6 +196,9 @@ func cmdManifest(args []string) error {
 		if manifest != "" {
 			fmt.Println(indent(manifest))
 		}
+		if attrs := c.AndroidApplicationAttrs(); attrs != "" {
+			fmt.Printf("\t<application%s>\n", attrs)
+		}
 		if app != "" {
 			fmt.Println("\tin <application>:")
 			fmt.Println(indent(app))
