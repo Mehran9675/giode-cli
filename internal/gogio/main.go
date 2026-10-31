@@ -140,6 +140,9 @@ type Extras struct {
 	// AndroidApplication XML added inside <application>.
 	AndroidManifest    string
 	AndroidApplication string
+	// AndroidIcon holds the adaptive icon's layers (Android 8+); see
+	// AdaptiveIcon. Unset layers come from the app icon.
+	AndroidIcon AdaptiveIcon
 	// AndroidJava are the app's own .java files, compiled with Gio's
 	// against android.jar and added to the APK.
 	AndroidJava []string

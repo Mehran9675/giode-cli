@@ -161,6 +161,19 @@ type Android struct {
 	Repositories []string `toml:"repositories"`
 	// Libraries are local .aar and .jar files built in.
 	Libraries []string `toml:"libraries"`
+	// IconForeground, IconBackground and IconMonochrome are the
+	// adaptive icon's layers (Android 8 and later): 108dp squares of
+	// which launchers show the middle 72dp, cut to a circle, squircle or
+	// other shape, with the artwork kept inside the middle 66dp.
+	// IconForeground is a PNG over the whole canvas; without it, the app
+	// icon is shrunk into the safe zone. IconBackground is a PNG or a
+	// color ("#0f172a"); without it, the color around the app icon's
+	// edge. IconMonochrome is a PNG whose shape Android 13 and later
+	// tint for themed icons; without it, themed icons show the full
+	// color icon.
+	IconForeground string `toml:"icon_foreground"`
+	IconBackground string `toml:"icon_background"`
+	IconMonochrome string `toml:"icon_monochrome"`
 	// Java are directories (searched recursively) or files of the
 	// app's own Java sources, compiled with Gio's against the SDK's
 	// android.jar (Java 8 language level) and built in: classes the

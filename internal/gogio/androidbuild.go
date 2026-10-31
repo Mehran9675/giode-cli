@@ -435,25 +435,26 @@ func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, li
 	}
 	iconSnip := ""
 	if _, err := os.Stat(bi.iconPath); err == nil {
+		// Legacy icons for Android 7 and earlier; the adaptive icon's
+		// layers for 8 and later.
 		err := buildIcons(resDir, bi.iconPath, []iconVariant{
 			{path: filepath.Join("mipmap-hdpi", "ic_launcher.png"), size: 72},
 			{path: filepath.Join("mipmap-xhdpi", "ic_launcher.png"), size: 96},
 			{path: filepath.Join("mipmap-xxhdpi", "ic_launcher.png"), size: 144},
 			{path: filepath.Join("mipmap-xxxhdpi", "ic_launcher.png"), size: 192},
-			{path: filepath.Join("mipmap-mdpi", "ic_launcher_adaptive.png"), size: 108},
-			{path: filepath.Join("mipmap-hdpi", "ic_launcher_adaptive.png"), size: 162},
-			{path: filepath.Join("mipmap-xhdpi", "ic_launcher_adaptive.png"), size: 216},
-			{path: filepath.Join("mipmap-xxhdpi", "ic_launcher_adaptive.png"), size: 324},
-			{path: filepath.Join("mipmap-xxxhdpi", "ic_launcher_adaptive.png"), size: 432},
 		})
 		if err != nil {
 			return err
 		}
-		err = os.WriteFile(filepath.Join(v26mipmapDir, `ic_launcher.xml`), []byte(`<?xml version="1.0" encoding="utf-8"?>
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@mipmap/ic_launcher_adaptive" />
-    <foreground android:drawable="@mipmap/ic_launcher_adaptive" />
-</adaptive-icon>`), 0o660)
+		appIcon, err := decodePNG(bi.iconPath)
+		if err != nil {
+			return err
+		}
+		adaptive, err := writeAdaptiveIcon(resDir, appIcon, extras.AndroidIcon)
+		if err != nil {
+			return err
+		}
+		err = os.WriteFile(filepath.Join(v26mipmapDir, `ic_launcher.xml`), []byte(adaptive), 0o660)
 		if err != nil {
 			return err
 		}
