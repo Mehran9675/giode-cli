@@ -392,6 +392,14 @@ func gogioOptions(c *config.Config, target string, o buildOpts) (gogio.Options, 
 			return g, err
 		}
 		g.Extras.AndroidJava = java
+		g.Extras.AndroidIcon = gogio.AdaptiveIcon{
+			Foreground: pathOrEmpty(c, c.Android.IconForeground),
+			Background: c.Android.IconBackground,
+			Monochrome: pathOrEmpty(c, c.Android.IconMonochrome),
+		}
+		if bg := c.Android.IconBackground; bg != "" && !strings.HasPrefix(bg, "#") {
+			g.Extras.AndroidIcon.Background = c.Path(bg)
+		}
 		if o.release {
 			if c.Android.Keystore == "" {
 				return g, errors.New("-release needs android.keystore in giode.toml (giode keystore creates one)")
@@ -662,4 +670,12 @@ func javaSources(c *config.Config) ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+// pathOrEmpty resolves a giode.toml path, keeping "" unset.
+func pathOrEmpty(c *config.Config, p string) string {
+	if p == "" {
+		return ""
+	}
+	return c.Path(p)
 }

@@ -133,6 +133,9 @@ manifest = '<uses-feature android:name="android.hardware.camera" android:require
 application = '<meta-data android:name="example" android:value="1"/>'
 application_attributes = { requestLegacyExternalStorage = "true" }  # on <application>
 java = ["android/java"]       # the app's own Java sources, compiled in (see giode/android)
+icon_foreground = "assets/android-foreground.png"  # adaptive icon layers (Android 8+): 108dp
+icon_background = "#0f172a"   # canvases, artwork in the middle 66dp; background a PNG or color
+icon_monochrome = "assets/android-monochrome.png" # themed icons (Android 13+), optional
 keystore = "release.keystore" # used by giode build -release
 keystore_pass_env = "GIODE_KEYSTORE_PASS"
 google_services = "google-services.json"   # from the Firebase console, for giode/push
@@ -459,6 +462,25 @@ from giode.toml and overwritten.
 Every package's name carries its CPU, so builds for two CPUs can share a release:
 `<App>-<version>-<arch>-setup.exe`, `<App>-<version>-<arch>.msix` and
 `<App>-<version>-universal.dmg` (or `-arm64`/`-amd64` with a single `-arch`).
+
+## Android icon
+
+Android 8 and later draw the launcher icon from two layers, each a 108dp square of which
+the launcher shows only the middle, cut to its own shape (a circle, a squircle, ...). Keep
+the artwork inside the middle 66dp. Without settings, giode builds them from `app.icon`: the
+icon shrunk into that safe zone on a transparent foreground, over the color around its edge
+(white for a transparent edge), so a square icon isn't clipped. To draw the layers
+yourself:
+
+```toml
+[android]
+icon_foreground = "assets/android-foreground.png" # the whole 108dp canvas, transparent around the artwork
+icon_background = "assets/android-background.png" # or a color: "#0f172a"
+icon_monochrome = "assets/android-monochrome.png" # optional: its shape is tinted for themed icons (Android 13+)
+```
+
+Without `icon_monochrome`, themed icons show the full-color icon. Android 7 and earlier
+use `app.icon` as is.
 
 ## Android libraries
 
